@@ -3,8 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Mapping
 
-from .persistence import GameRepository, SQLiteGameRepository
-from .supabase_repository import SupabaseGameRepository
+from .editable_repository import EditableSQLiteGameRepository, EditableSupabaseGameRepository
+from .persistence import GameRepository
 
 
 SUPABASE_URL_SECRET = "SUPABASE_URL"
@@ -28,12 +28,7 @@ def create_repository(
     secrets: Mapping[str, Any] | Any = None,
     sqlite_path: str | Path = Path("data") / "wod_rpg.sqlite3",
 ) -> tuple[GameRepository, str]:
-    """Select durable Supabase persistence when both server secrets exist.
-
-    SQLite remains the explicit local-development fallback. A partial Supabase
-    configuration is treated as an error so production never silently writes to
-    ephemeral local storage.
-    """
+    """Utilise Supabase en production et SQLite comme repli local explicite."""
 
     supabase_url = _read_secret(secrets, SUPABASE_URL_SECRET)
     supabase_key = _read_secret(secrets, SUPABASE_KEY_SECRET)
@@ -45,6 +40,6 @@ def create_repository(
         )
 
     if supabase_url and supabase_key:
-        return SupabaseGameRepository(supabase_url, supabase_key), "Supabase"
+        return EditableSupabaseGameRepository(supabase_url, supabase_key), "Supabase"
 
-    return SQLiteGameRepository(sqlite_path), "SQLite local"
+    return EditableSQLiteGameRepository(sqlite_path), "SQLite local"
