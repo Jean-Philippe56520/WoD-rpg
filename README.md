@@ -10,45 +10,32 @@ Le MVP reste limité à **Brujah, Toreador et Ventrue**.
 
 ### Partie multijoueur asynchrone
 
-- un joueur contrôle un seul clan ;
-- le joueur incarne le Primogène actuel de ce clan ;
-- sa session charge son clan en détail, mais seulement les informations publiques des autres clans ;
-- chaque joueur prépare ses choix puis clique sur **Valider ma nuit** ;
-- les ordres soumis deviennent persistants et ne sont plus modifiables pour cette nuit ;
-- aucune action n'est résolue immédiatement ;
-- la nuit globale est résolue automatiquement lorsque les trois clans ont soumis leurs ordres ;
-- le verrou `RESOLVING` empêche qu'une même nuit soit résolue deux fois ;
-- chaque clan reçoit ensuite son propre rapport selon les événements qu'il pouvait connaître ;
-- la nuit suivante s'ouvre automatiquement.
+- un joueur contrôle un seul clan et incarne son Primogène ;
+- chaque joueur prépare puis verrouille ses ordres de nuit ;
+- les actions ne sont résolues qu'une fois les trois clans prêts ;
+- le verrou `READY -> RESOLVING -> RESOLVED` empêche une double résolution ;
+- chaque clan reçoit son propre rapport selon les informations qu'il peut connaître ;
+- l'Elysium reste disponible pendant l'attente ;
+- une demande d'Étreinte est portée par le Primogène au nom d'un membre précis du clan.
 
-L'Elysium est indépendant de ce cycle : un joueur qui a déjà validé ses ordres peut toujours discuter avec les autres joueurs.
-
-### Politique
-
-Le moteur conserve les systèmes précédents :
-
-- Praxis et vote pondéré des Primogènes ;
-- Prince et Primogène incompatibles ;
-- succession automatique d'un Primogène devenu Prince ;
-- axes politiques Humanisme / Tradition ;
-- jusqu'à quatre courants idéologiques dynamiques par clan ;
-- influence des courants dérivée de leurs membres ;
-- dissidence 50/50 courant par courant ;
-- affinité idéologique ;
-- capital politique du Prince ;
-- autorisations d'Étreinte.
-
-Une demande au Prince est désormais portée officiellement par le **Primogène**, au nom d'un membre précis de son clan.
+Le moteur conserve Praxis, Prince/Primogène incompatibles, successions, axes Humanisme/Tradition, quatre courants idéologiques possibles, dissidence 50/50 courant par courant, affinité idéologique et capital politique du Prince.
 
 ## Persistance
 
-La couche métier ne dépend pas de Streamlit.
+`game/persistence.py` définit le contrat `GameRepository` et conserve `SQLiteGameRepository` pour le développement local et les tests.
 
-`game/persistence.py` définit une interface de dépôt et fournit actuellement `SQLiteGameRepository` pour le développement et les tests multijoueurs.
+`game/supabase_repository.py` fournit la persistance distante PostgreSQL/Supabase. Le schéma reproductible se trouve dans `supabase/schema.sql`.
 
-SQLite n'est **jamais commité dans Git**. Le fichier est ignoré par `.gitignore`.
+Le projet Supabase dédié est `WoD-rpg` (`eu-west-3`). Les tables de jeu sont accessibles uniquement au rôle serveur ; `anon` et `authenticated` n'ont aucun accès direct à l'état complet, aux ordres ou aux rapports. Les transitions critiques de nuit sont atomiques dans PostgreSQL.
 
-Sur Streamlit Cloud, SQLite permet de partager l'état entre sessions tant que l'instance conserve son disque, mais ce stockage n'est pas garanti après un redéploiement ou un redémarrage. La persistance durable cible PostgreSQL / Supabase. Le schéma préparatoire se trouve dans `supabase/schema.sql`.
+Pour activer Supabase sur Streamlit Cloud, les secrets serveur doivent être configurés hors Git :
+
+```toml
+SUPABASE_URL = "https://kxsutwksruraladbatti.supabase.co"
+SUPABASE_SECRET_KEY = "<secret serveur Supabase>"
+```
+
+Le secret serveur ne doit jamais être commité. Tant que ces secrets ne sont pas présents dans l'application Streamlit, le backend SQLite actuel reste utilisé.
 
 ## Architecture
 
@@ -57,12 +44,13 @@ Sur Streamlit Cloud, SQLite permet de partager l'état entre sessions tant que l
 - `game/politics.py` : dissidences et vote de Praxis ;
 - `game/actions.py` : actions politiques ;
 - `game/offices.py` : Prince, Primogènes et successions ;
-- `game/embrace.py` : demandes d'Étreinte et décisions du Prince ;
+- `game/embrace.py` : demandes d'Étreinte ;
 - `game/resolution.py` : résolution globale d'une nuit ;
 - `game/serialization.py` : sérialisation JSON stable ;
-- `game/persistence.py` : stockage des parties, ordres, rapports et Elysium ;
-- `game/multiplayer.py` : orchestration asynchrone joueur/clan/nuit ;
-- `game/world.py` : monde initial ;
+- `game/persistence.py` : contrat de stockage + SQLite local ;
+- `game/supabase_repository.py` : stockage distant Supabase ;
+- `game/multiplayer.py` : orchestration joueur/clan/nuit ;
+- `supabase/schema.sql` : schéma PostgreSQL et fonctions atomiques ;
 - `app.py` : interface Streamlit ;
 - `tests/` : tests automatisés.
 
@@ -74,10 +62,9 @@ pytest -q
 
 ## Suite cible
 
-1. brancher la persistance distante PostgreSQL/Supabase ;
-2. authentification réelle des joueurs ;
-3. déclarations de candidatures à la Praxis ;
-4. demandes internes autonomes des membres au Primogène ;
-5. événements et informations avec brouillard de guerre plus fin ;
-6. relations, faveurs et dettes ;
-7. territoires, institutions et Mascarade avancée.
+1. ajouter le secret serveur dans Streamlit Cloud et valider une écriture réelle depuis l'application ;
+2. ajouter une authentification réelle des joueurs ;
+3. approfondir les mécaniques politiques internes : demandes autonomes des membres, candidatures, pressions et négociations ;
+4. affiner le brouillard de guerre et les informations ;
+5. relations, faveurs et dettes ;
+6. territoires, institutions et Mascarade avancée.
