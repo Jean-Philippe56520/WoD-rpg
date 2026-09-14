@@ -2,24 +2,53 @@ from __future__ import annotations
 
 import streamlit as st
 
-from game.models import Candidate, OppositionStance, PrimogenVote
-from game.politics import resolve_praxis_vote
-from game.world import seed_candidates, seed_characters, seed_clans
+from game.actions import ACTION_LABELS
+from game.config import DEFAULT_RULES
+from game.models import ActionType, Candidate, GameAction, PrimogenVote
+from game.politics import determine_opposition_stances
+from game.resolution import resolve_night
+from game.world import create_initial_game_state, seed_candidates, seed_characters
 
 
-st.set_page_config(page_title="WoD RPG — Praxis", page_icon="🩸", layout="wide")
+st.set_page_config(page_title="WoD RPG — Chronique politique", page_icon="🩸", layout="wide")
 
-st.title("WoD RPG — Prototype politique")
-st.caption("V0.1 · Brujah · Toreador · Ventrue · vote de Praxis et dissidence interne")
+st.title("WoD RPG — Chronique politique")
+st.caption("V0.2 · Brujah · Toreador · Ventrue · nuits politiques asynchrones")
 
 characters = seed_characters()
-clans = seed_clans()
-base_candidates = seed_candidates()
 
+if "game_state" not in st.session_state:
+    st.session_state.game_state = create_initial_game_state()
 if "extra_candidates" not in st.session_state:
     st.session_state.extra_candidates = []
+if "last_resolution" not in st.session_state:
+    st.session_state.last_resolution = None
 
-with st.expander("Ajouter un candidat non-Primogène"):
+state = st.session_state.game_state
+
+with st.sidebar:
+    st.header("Chronique")
+    st.metric("Nuit", state.night)
+    st.metric("Stabilité Camarilla", f"{state.camarilla_stability:.0f}%")
+    st.metric("Intégrité Mascarade", f"{state.masquerade_integrity:.0f}%")
+    st.write(f"**Praxis :** {state.praxis_status}")
+    if state.prince_id:
+        prince_name = next(
+            (
+                candidate.name
+                for candidate in seed_candidates() + st.session_state.extra_candidates
+                if candidate.id == state.prince_id
+            ),
+            state.prince_id,
+        )
+        st.write(f"**Prince :** {prince_name}")
+    if st.button("Réinitialiser la chronique", use_container_width=True):
+        st.session_state.game_state = create_initial_game_state()
+        st.session_state.extra_candidates = []
+        st.session_state.last_resolution = None
+        st.rerun()
+
+with st.expander("Ajouter un candidat non-Primogène à la Praxis"):
     candidate_name = st.text_input("Nom du candidat")
     if st.button("Ajouter le candidat", disabled=not candidate_name.strip()):
         candidate_id = f"outsider_{len(st.session_state.extra_candidates) + 1}"
@@ -28,113 +57,142 @@ with st.expander("Ajouter un candidat non-Primogène"):
         )
         st.rerun()
 
-candidates = base_candidates + st.session_state.extra_candidates
+candidates = seed_candidates() + st.session_state.extra_candidates
 candidate_labels = {candidate.id: candidate.name for candidate in candidates}
 primogen_labels = {
-    clan.primogen_id: characters[clan.primogen_id].name for clan in clans
+    clan_state.clan.primogen_id: characters[clan_state.clan.primogen_id].name
+    for clan_state in state.clan_states.values()
 }
+stances = determine_opposition_stances(state)
 
-st.subheader("Conseil des Primogènes")
+st.subheader(f"Préparation de la nuit {state.night}")
+st.info(
+    f"Chaque clan dispose de {DEFAULT_RULES.actions_per_clan} actions. "
+    "L'opposition décide elle-même si elle suit son Primogène ; le joueur peut seulement agir sur l'équilibre politique."
+)
+
 cols = st.columns(3)
-stances: dict[str, OppositionStance] = {}
+actions: list[GameAction] = []
 votes: dict[str, PrimogenVote] = {}
 
-for col, clan in zip(cols, clans):
+for col, clan_state in zip(cols, state.clan_states.values()):
+    clan = clan_state.clan
     with col:
         primogen = characters[clan.primogen_id]
         st.markdown(f"### {clan.name}")
         st.write(f"**Primogène :** {primogen.name}")
-        st.metric("Influence totale du clan", f"{clan.total_influence:.0f}")
+        st.metric("Influence totale", f"{clan.total_influence:.0f}")
         st.write(
             f"Courant du Primogène : **{clan.dominant_current.influence:.0f}**  \n"
             f"Opposition ({clan.opposition_current.leader_name}) : **{clan.opposition_current.influence:.0f}**"
         )
-
-        support = st.toggle(
-            "L'opposition soutient le vote du Primogène",
-            value=True,
-            key=f"support_{clan.id}",
+        st.progress(
+            clan_state.opposition_loyalty / 100,
+            text=f"Loyauté opposition : {clan_state.opposition_loyalty:.0f}/100",
         )
 
-        ally_id = None
-        if not support:
-            eligible_allies = {
-                pid: label
-                for pid, label in primogen_labels.items()
-                if pid != clan.primogen_id
-            }
-            ally_id = st.selectbox(
-                "Primogène allié de l'opposition",
-                options=list(eligible_allies),
-                format_func=lambda pid: eligible_allies[pid],
-                key=f"ally_{clan.id}",
+        stance = stances[clan.id]
+        if stance.supports_primogen:
+            st.success("Opposition : soutien probable au Primogène")
+        else:
+            ally_name = primogen_labels.get(
+                clan_state.opposition_ally_id, clan_state.opposition_ally_id
+            )
+            st.warning(f"Opposition : dissidence probable · allié : {ally_name}")
+
+        st.markdown("**Relations**")
+        for target_id, score in clan_state.relations.items():
+            target_name = state.clan_states[target_id].clan.name
+            st.caption(f"{target_name} : {score:+.0f}")
+
+        st.markdown("**Actions**")
+        action_options = list(ActionType)
+        for index in range(DEFAULT_RULES.actions_per_clan):
+            action_type = st.selectbox(
+                f"Action {index + 1}",
+                options=action_options,
+                format_func=lambda action: ACTION_LABELS[action],
+                key=f"action_{state.night}_{clan.id}_{index}",
+            )
+            target_clan_id = None
+            if action_type == ActionType.DIPLOMACY:
+                targets = [cid for cid in state.clan_states if cid != clan.id]
+                target_clan_id = st.selectbox(
+                    "Clan ciblé",
+                    options=targets,
+                    format_func=lambda cid: state.clan_states[cid].clan.name,
+                    key=f"target_{state.night}_{clan.id}_{index}",
+                )
+            actions.append(
+                GameAction(
+                    clan_id=clan.id,
+                    action_type=action_type,
+                    target_clan_id=target_clan_id,
+                )
             )
 
-        vote_candidate = st.selectbox(
-            "Vote du Primogène pour la Praxis",
-            options=list(candidate_labels),
-            format_func=lambda cid: candidate_labels[cid],
-            key=f"vote_{clan.id}",
-        )
-
-        stances[clan.id] = OppositionStance(
-            clan_id=clan.id,
-            supports_primogen=support,
-            allied_primogen_id=ally_id,
-        )
-        votes[clan.primogen_id] = PrimogenVote(
-            primogen_id=clan.primogen_id,
-            candidate_id=vote_candidate,
-        )
+        if state.prince_id is None:
+            candidate_ids = list(candidate_labels)
+            default_vote_index = (
+                candidate_ids.index(clan.primogen_id)
+                if clan.primogen_id in candidate_ids
+                else 0
+            )
+            vote_candidate = st.selectbox(
+                "Vote du Primogène pour la Praxis",
+                options=candidate_ids,
+                index=default_vote_index,
+                format_func=lambda cid: candidate_labels[cid],
+                key=f"vote_{state.night}_{clan.id}",
+            )
+            votes[clan.primogen_id] = PrimogenVote(
+                primogen_id=clan.primogen_id,
+                candidate_id=vote_candidate,
+            )
+        else:
+            st.caption("Un Prince est reconnu : aucun vote de Praxis n'est ouvert cette nuit.")
 
 st.divider()
-
-if st.button("Résoudre le vote de Praxis", type="primary", use_container_width=True):
-    result = resolve_praxis_vote(
-        clans=clans,
-        stances=stances,
+if st.button(
+    f"Résoudre la nuit {state.night}", type="primary", use_container_width=True
+):
+    resolution = resolve_night(
+        state=state,
+        actions=actions,
         votes=votes,
         candidates=candidates,
-        opposition_transfer_ratio=0.5,
     )
+    st.session_state.game_state = resolution.state
+    st.session_state.last_resolution = resolution
+    st.rerun()
 
-    st.subheader("Résolution")
-    weight_cols = st.columns(3)
-    for col, clan in zip(weight_cols, clans):
-        with col:
-            st.metric(
-                primogen_labels[clan.primogen_id],
-                f"{result.primogen_weights[clan.primogen_id]:.1f}",
-                help="Poids politique du vote après éventuelle dissidence interne.",
-            )
-
-    if result.opposition_transfers:
-        st.markdown("#### Transferts d'influence")
-        for transfer in result.opposition_transfers:
-            from_clan = next(c for c in clans if c.id == transfer["from_clan_id"])
-            st.write(
-                f"- Opposition **{from_clan.name}** : **{transfer['amount']:.1f}** d'influence "
-                f"renforce le vote de **{primogen_labels[str(transfer['to_primogen_id'])]}**."
-            )
-
-    st.markdown("#### Poids reçu par candidat")
+last_resolution = st.session_state.last_resolution
+if last_resolution and last_resolution.vote:
+    st.subheader("Dernière résolution de Praxis")
+    vote = last_resolution.vote
     for candidate_id, score in sorted(
-        result.candidate_totals.items(), key=lambda item: item[1], reverse=True
+        vote.candidate_totals.items(), key=lambda item: item[1], reverse=True
     ):
-        st.write(f"**{candidate_labels[candidate_id]}** : {score:.1f}")
-
-    if result.disputed:
-        st.error("Praxis contestée : aucun candidat ne dispose d'une victoire nette.")
+        st.write(f"**{candidate_labels.get(candidate_id, candidate_id)}** : {score:.1f}")
+    st.caption(
+        f"Majorité nécessaire : strictement plus de {vote.recognition_threshold:.1f} "
+        f"sur {vote.total_cast_influence:.1f} influence exprimée."
+    )
+    if vote.disputed:
+        st.error("Praxis contestée : aucune majorité politique suffisante.")
     else:
-        winner = next(c for c in candidates if c.id == result.winner_id)
-        st.success(f"Praxis attribuée à **{winner.name}** dans cette version du moteur.")
-        if winner.is_primogen:
-            st.warning(
-                "Le vainqueur est Primogène : s'il devient Prince, son siège de Primogène doit devenir vacant. "
-                "La succession interne du clan sera gérée dans une prochaine version."
-            )
+        winner_name = candidate_labels.get(vote.winner_id, vote.winner_id)
+        st.success(f"{winner_name} obtient une majorité de reconnaissance.")
 
-st.info(
-    "Règle V0.1 : en cas de dissidence, 50 % de l'influence du courant d'opposition reste dans le poids "
-    "du Primogène du clan et 50 % renforce le poids du vote du Primogène allié choisi préalablement."
+st.subheader("Chronique des événements")
+if not state.events:
+    st.caption("Aucun événement résolu pour le moment.")
+else:
+    for event in reversed(state.events[-18:]):
+        st.write(
+            f"**Nuit {event.night} · {event.category.capitalize()}** — {event.message}"
+        )
+
+st.caption(
+    "V0.2 : l'état est conservé dans la session Streamlit. Une base persistante distante viendra plus tard pour le multijoueur réel."
 )

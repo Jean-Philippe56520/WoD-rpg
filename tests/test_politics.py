@@ -3,97 +3,78 @@ from game.politics import resolve_praxis_vote
 from game.world import seed_candidates, seed_clans
 
 
-def test_all_oppositions_support_their_primogen():
-    clans = seed_clans()
-    candidates = seed_candidates()
-    stances = {
-        clan.id: OppositionStance(clan_id=clan.id, supports_primogen=True)
-        for clan in clans
-    }
-    votes = {
-        clan.primogen_id: PrimogenVote(
-            primogen_id=clan.primogen_id,
-            candidate_id=clan.primogen_id,
-        )
+def _self_votes(clans):
+    return {
+        clan.primogen_id: PrimogenVote(clan.primogen_id, clan.primogen_id)
         for clan in clans
     }
 
-    result = resolve_praxis_vote(clans, stances, votes, candidates)
+
+def test_plurality_without_majority_is_disputed():
+    clans = seed_clans()
+    result = resolve_praxis_vote(
+        clans,
+        {clan.id: OppositionStance(clan.id, True) for clan in clans},
+        _self_votes(clans),
+        seed_candidates(),
+    )
 
     assert result.primogen_weights["primogen_ventrue"] == 100
-    assert result.primogen_weights["primogen_toreador"] == 80
-    assert result.primogen_weights["primogen_brujah"] == 70
-    assert result.winner_id == "primogen_ventrue"
-    assert result.disputed is False
+    assert result.total_cast_influence == 250
+    assert result.recognition_threshold == 125
+    assert result.winner_id is None
+    assert result.disputed is True
 
 
 def test_dissent_transfers_half_opposition_to_allied_primogen_vote_weight():
     clans = seed_clans()
-    candidates = seed_candidates()
     stances = {
-        "ventrue": OppositionStance(
-            clan_id="ventrue",
-            supports_primogen=False,
-            allied_primogen_id="primogen_toreador",
-        ),
-        "toreador": OppositionStance(clan_id="toreador", supports_primogen=True),
-        "brujah": OppositionStance(clan_id="brujah", supports_primogen=True),
-    }
-    votes = {
-        "primogen_ventrue": PrimogenVote(
-            primogen_id="primogen_ventrue", candidate_id="primogen_ventrue"
-        ),
-        "primogen_toreador": PrimogenVote(
-            primogen_id="primogen_toreador", candidate_id="primogen_toreador"
-        ),
-        "primogen_brujah": PrimogenVote(
-            primogen_id="primogen_brujah", candidate_id="primogen_brujah"
-        ),
+        "ventrue": OppositionStance("ventrue", False, "primogen_toreador"),
+        "toreador": OppositionStance("toreador", True),
+        "brujah": OppositionStance("brujah", True),
     }
 
-    result = resolve_praxis_vote(clans, stances, votes, candidates)
+    result = resolve_praxis_vote(clans, stances, _self_votes(clans), seed_candidates())
 
     assert result.primogen_weights["primogen_ventrue"] == 80
     assert result.primogen_weights["primogen_toreador"] == 100
     assert result.candidate_totals["primogen_ventrue"] == 80
     assert result.candidate_totals["primogen_toreador"] == 100
-    assert result.winner_id == "primogen_toreador"
 
 
 def test_transferred_influence_follows_allied_primogens_candidate_choice():
     clans = seed_clans()
-    candidates = seed_candidates()
     stances = {
-        "ventrue": OppositionStance(
-            clan_id="ventrue",
-            supports_primogen=False,
-            allied_primogen_id="primogen_toreador",
-        )
+        "ventrue": OppositionStance("ventrue", False, "primogen_toreador")
     }
     votes = {
-        "primogen_ventrue": PrimogenVote(
-            primogen_id="primogen_ventrue", candidate_id="primogen_ventrue"
-        ),
-        "primogen_toreador": PrimogenVote(
-            primogen_id="primogen_toreador", candidate_id="primogen_brujah"
-        ),
-        "primogen_brujah": PrimogenVote(
-            primogen_id="primogen_brujah", candidate_id="primogen_brujah"
-        ),
+        "primogen_ventrue": PrimogenVote("primogen_ventrue", "primogen_ventrue"),
+        "primogen_toreador": PrimogenVote("primogen_toreador", "primogen_brujah"),
+        "primogen_brujah": PrimogenVote("primogen_brujah", "primogen_brujah"),
     }
 
-    result = resolve_praxis_vote(clans, stances, votes, candidates)
+    result = resolve_praxis_vote(clans, stances, votes, seed_candidates())
 
     assert result.primogen_weights["primogen_toreador"] == 100
     assert result.candidate_totals["primogen_brujah"] == 170
     assert result.winner_id == "primogen_brujah"
 
 
-def test_no_votes_yields_disputed_praxis():
+def test_coalition_majority_recognises_candidate():
     clans = seed_clans()
-    candidates = seed_candidates()
+    votes = {
+        "primogen_ventrue": PrimogenVote("primogen_ventrue", "primogen_ventrue"),
+        "primogen_toreador": PrimogenVote("primogen_toreador", "primogen_ventrue"),
+        "primogen_brujah": PrimogenVote("primogen_brujah", "primogen_brujah"),
+    }
+    result = resolve_praxis_vote(clans, {}, votes, seed_candidates())
 
-    result = resolve_praxis_vote(clans, {}, {}, candidates)
+    assert result.candidate_totals["primogen_ventrue"] == 180
+    assert result.winner_id == "primogen_ventrue"
+    assert result.disputed is False
 
+
+def test_no_votes_yields_disputed_praxis():
+    result = resolve_praxis_vote(seed_clans(), {}, {}, seed_candidates())
     assert result.disputed is True
     assert result.winner_id is None
