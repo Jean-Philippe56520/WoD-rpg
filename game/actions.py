@@ -1,13 +1,19 @@
 from __future__ import annotations
 
 from .config import DEFAULT_RULES, GameRules
+from .ideology import (
+    build_currents,
+    character_affinity,
+    initialize_current_politics,
+    primogen_current_id,
+)
 from .models import ActionType, GameAction, GameEvent, GameState
 
 
 ACTION_LABELS = {
-    ActionType.CONSOLIDATE: "Consolider le courant du Primogène",
-    ActionType.RALLY_OPPOSITION: "Rallier l'opposition",
-    ActionType.BUILD_INFLUENCE: "Mobiliser les réseaux du clan",
+    ActionType.CONSOLIDATE: "Consolider le courant du Primogene",
+    ActionType.RALLY_OPPOSITION: "Rallier un courant rival",
+    ActionType.BUILD_INFLUENCE: "Mobiliser les reseaux du clan",
     ActionType.DIPLOMACY: "Diplomatie avec un autre clan",
 }
 
@@ -24,36 +30,64 @@ def apply_action(
     if action.clan_id not in state.clan_states:
         raise ValueError(f"Unknown clan: {action.clan_id}")
 
+    initialize_current_politics(state, rules)
     clan_state = state.clan_states[action.clan_id]
     clan = clan_state.clan
+    primogen = state.characters[clan.primogen_id]
+    primary_id = primogen_current_id(state, action.clan_id)
+    currents = build_currents(state, action.clan_id)
 
     if action.action_type == ActionType.CONSOLIDATE:
-        shifted = min(rules.consolidate_shift, clan.opposition_current.influence)
-        clan.opposition_current.influence -= shifted
-        clan.dominant_current.influence += shifted
-        clan_state.opposition_loyalty = _clamp(
-            clan_state.opposition_loyalty - rules.consolidate_loyalty_penalty
-        )
+        primogen.personal_influence += rules.consolidate_influence_gain
+        for current_id in currents:
+            if current_id == primary_id:
+                continue
+            clan_state.current_loyalties[current_id] = _clamp(
+                clan_state.current_loyalties.get(current_id, rules.current_default_loyalty)
+                - rules.consolidate_rival_loyalty_penalty
+            )
         message = (
-            f"{clan.name} consolide le courant du Primogène : {shifted:.0f} influence "
-            "bascule depuis l'opposition, qui apprécie peu la manœuvre."
+            f"{clan.name} consolide le courant du Primogene : influence personnelle de "
+            f"{primogen.name} +{rules.consolidate_influence_gain:.0f}, au prix d'une tension "
+            "avec les courants rivaux."
         )
 
     elif action.action_type == ActionType.RALLY_OPPOSITION:
-        before = clan_state.opposition_loyalty
-        clan_state.opposition_loyalty = _clamp(before + rules.rally_loyalty_gain)
-        gained = clan_state.opposition_loyalty - before
+        target_id = action.target_current_id
+        if not target_id or target_id == primary_id:
+            raise ValueError("Rallying requires a rival current")
+        if target_id not in currents:
+            raise ValueError(f"Unknown target current: {target_id}")
+        before = clan_state.current_loyalties.get(
+            target_id, rules.current_default_loyalty
+        )
+        clan_state.current_loyalties[target_id] = _clamp(
+            before + rules.rally_current_loyalty_gain
+        )
+        gained = clan_state.current_loyalties[target_id] - before
         message = (
-            f"{clan.name} rallie son opposition : loyauté interne +{gained:.0f}."
+            f"{clan.name} rallie le courant {currents[target_id].name} : "
+            f"loyaute envers le Primogene +{gained:.0f}."
         )
 
     elif action.action_type == ActionType.BUILD_INFLUENCE:
-        clan.dominant_current.influence += rules.influence_gain_dominant
-        clan.opposition_current.influence += rules.influence_gain_opposition
-        message = (
-            f"{clan.name} mobilise ses réseaux : influence du clan +"
-            f"{rules.influence_gain_dominant + rules.influence_gain_opposition:.0f}."
+        primogen.personal_influence += rules.influence_gain_primogen
+        peers = [
+            state.characters[member_id]
+            for member_id in currents[primary_id].member_ids
+            if member_id != primogen.id and member_id != state.prince_id
+        ]
+        peer_name = None
+        if peers:
+            peer = max(peers, key=lambda member: (member.personal_influence, member.id))
+            peer.personal_influence += rules.influence_gain_peer
+            peer_name = peer.name
+        total_gain = rules.influence_gain_primogen + (
+            rules.influence_gain_peer if peer_name else 0.0
         )
+        message = f"{clan.name} mobilise ses reseaux : influence personnelle cumulee +{total_gain:.0f}."
+        if peer_name:
+            message += f" {peer_name} profite egalement de cette mobilisation."
 
     elif action.action_type == ActionType.DIPLOMACY:
         target_id = action.target_clan_id
@@ -62,11 +96,17 @@ def apply_action(
         if target_id not in state.clan_states:
             raise ValueError(f"Unknown target clan: {target_id}")
         target_state = state.clan_states[target_id]
-        clan_state.relations[target_id] = clan_state.relations.get(target_id, 0.0) + rules.diplomacy_gain
-        target_state.relations[action.clan_id] = target_state.relations.get(action.clan_id, 0.0) + rules.diplomacy_gain
+        target_primogen = state.characters[target_state.clan.primogen_id]
+        affinity = character_affinity(primogen, target_primogen)
+        gain = max(
+            rules.diplomacy_minimum_gain,
+            rules.diplomacy_gain + affinity * rules.ideology_diplomacy_scale,
+        )
+        clan_state.relations[target_id] = clan_state.relations.get(target_id, 0.0) + gain
+        target_state.relations[action.clan_id] = target_state.relations.get(action.clan_id, 0.0) + gain
         message = (
-            f"{clan.name} ouvre des négociations avec {target_state.clan.name} : "
-            f"relation +{rules.diplomacy_gain:.0f}."
+            f"{clan.name} ouvre des negociations avec {target_state.clan.name} : "
+            f"relation +{gain:.1f} (affinite ideologique {affinity:+.0f})."
         )
 
     else:

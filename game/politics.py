@@ -4,51 +4,84 @@ from dataclasses import dataclass
 from typing import Iterable, Mapping
 
 from .config import DEFAULT_RULES, GameRules
-from .models import Candidate, Clan, GameState, OppositionStance, PrimogenVote
+from .ideology import (
+    build_currents,
+    ideological_affinity_values,
+    initialize_current_politics,
+    primogen_current_id,
+)
+from .models import Candidate, CurrentStance, GameState, PrimogenVote
 
 
 @dataclass(frozen=True)
 class VoteResolution:
     primogen_weights: dict[str, float]
     candidate_totals: dict[str, float]
-    opposition_transfers: list[dict[str, float | str]]
+    current_transfers: list[dict[str, float | str]]
     total_cast_influence: float
     recognition_threshold: float
     winner_id: str | None
     disputed: bool
 
 
-def _validate_unique_clans(clans: Iterable[Clan]) -> dict[str, Clan]:
-    clan_map: dict[str, Clan] = {}
-    for clan in clans:
-        if clan.id in clan_map:
-            raise ValueError(f"Duplicate clan id: {clan.id}")
-        clan_map[clan.id] = clan
-    return clan_map
-
-
-def determine_opposition_stances(
+def determine_current_stances(
     state: GameState,
     rules: GameRules = DEFAULT_RULES,
-) -> dict[str, OppositionStance]:
-    stances: dict[str, OppositionStance] = {}
+) -> dict[str, CurrentStance]:
+    initialize_current_politics(state, rules)
+    stances: dict[str, CurrentStance] = {}
     current_primogens = {cs.clan.primogen_id for cs in state.clan_states.values()}
+
     for clan_id, clan_state in state.clan_states.items():
-        supports = clan_state.opposition_loyalty >= rules.opposition_support_threshold
-        ally_id = None if supports else clan_state.opposition_ally_id
-        if ally_id is not None and ally_id not in current_primogens:
-            raise ValueError(f"Opposition ally is not a current Primogen: {ally_id}")
-        stances[clan_id] = OppositionStance(
-            clan_id=clan_id,
-            supports_primogen=supports,
-            allied_primogen_id=ally_id,
-        )
+        primogen = state.characters[clan_state.clan.primogen_id]
+        primary_id = primogen_current_id(state, clan_id)
+        for current_id, current in build_currents(state, clan_id).items():
+            if current_id == primary_id:
+                stances[current_id] = CurrentStance(
+                    clan_id=clan_id,
+                    current_id=current_id,
+                    supports_primogen=True,
+                    support_score=100.0,
+                    allied_primogen_id=None,
+                )
+                continue
+
+            loyalty = clan_state.current_loyalties.get(
+                current_id, rules.current_default_loyalty
+            )
+            affinity = ideological_affinity_values(
+                current.centroid_humanism,
+                current.centroid_tradition,
+                primogen.humanism,
+                primogen.tradition,
+            )
+            support_score = max(
+                0.0,
+                min(100.0, loyalty + affinity * rules.ideology_support_scale),
+            )
+            supports = support_score >= rules.current_support_threshold
+            ally_id = None if supports else clan_state.current_allies.get(current_id)
+            if ally_id is not None:
+                if ally_id == clan_state.clan.primogen_id:
+                    raise ValueError("A rival current cannot ally with its own Primogen")
+                if ally_id not in current_primogens:
+                    raise ValueError(f"Current ally is not a current Primogen: {ally_id}")
+            if not supports and not ally_id:
+                raise ValueError(f"Dissenting current has no allied Primogen: {current_id}")
+
+            stances[current_id] = CurrentStance(
+                clan_id=clan_id,
+                current_id=current_id,
+                supports_primogen=supports,
+                support_score=support_score,
+                allied_primogen_id=ally_id,
+            )
     return stances
 
 
 def resolve_praxis_vote(
-    clans: Iterable[Clan],
-    stances: Mapping[str, OppositionStance],
+    state: GameState,
+    stances: Mapping[str, CurrentStance],
     votes: Mapping[str, PrimogenVote],
     candidates: Iterable[Candidate],
     opposition_transfer_ratio: float = 0.5,
@@ -59,36 +92,42 @@ def resolve_praxis_vote(
     if not 0 <= recognition_threshold < 1:
         raise ValueError("recognition_threshold must be between 0 (inclusive) and 1")
 
-    clan_map = _validate_unique_clans(clans)
     candidate_map = {candidate.id: candidate for candidate in candidates}
-    primogen_to_clan = {clan.primogen_id: clan for clan in clan_map.values()}
-    primogen_weights = {clan.primogen_id: clan.total_influence for clan in clan_map.values()}
+    primogen_ids = {cs.clan.primogen_id for cs in state.clan_states.values()}
+    primogen_weights = {primogen_id: 0.0 for primogen_id in primogen_ids}
     transfers: list[dict[str, float | str]] = []
 
-    for clan_id, clan in clan_map.items():
-        stance = stances.get(clan_id, OppositionStance(clan_id=clan_id, supports_primogen=True))
-        if stance.supports_primogen:
-            continue
+    for clan_id, clan_state in state.clan_states.items():
+        own_primogen_id = clan_state.clan.primogen_id
+        primary_id = primogen_current_id(state, clan_id)
+        for current_id, current in build_currents(state, clan_id).items():
+            stance = stances.get(current_id)
+            supports = current_id == primary_id or stance is None or stance.supports_primogen
+            if supports:
+                primogen_weights[own_primogen_id] += current.influence
+                continue
 
-        ally_id = stance.allied_primogen_id
-        if not ally_id:
-            raise ValueError(f"{clan.name}: dissent requires an allied Primogen")
-        if ally_id == clan.primogen_id:
-            raise ValueError(f"{clan.name}: opposition ally cannot be its own Primogen")
-        if ally_id not in primogen_to_clan:
-            raise ValueError(f"Unknown allied Primogen: {ally_id}")
+            ally_id = stance.allied_primogen_id
+            if not ally_id:
+                raise ValueError(f"Dissenting current has no allied Primogen: {current_id}")
+            if ally_id == own_primogen_id:
+                raise ValueError("A rival current cannot ally with its own Primogen")
+            if ally_id not in primogen_weights:
+                raise ValueError(f"Unknown allied Primogen: {ally_id}")
 
-        transferred = clan.opposition_current.influence * opposition_transfer_ratio
-        primogen_weights[clan.primogen_id] -= transferred
-        primogen_weights[ally_id] += transferred
-        transfers.append(
-            {
-                "from_clan_id": clan_id,
-                "from_primogen_id": clan.primogen_id,
-                "to_primogen_id": ally_id,
-                "amount": transferred,
-            }
-        )
+            transferred = current.influence * opposition_transfer_ratio
+            retained = current.influence - transferred
+            primogen_weights[own_primogen_id] += retained
+            primogen_weights[ally_id] += transferred
+            transfers.append(
+                {
+                    "from_clan_id": clan_id,
+                    "from_current_id": current_id,
+                    "from_primogen_id": own_primogen_id,
+                    "to_primogen_id": ally_id,
+                    "amount": transferred,
+                }
+            )
 
     candidate_totals = {candidate_id: 0.0 for candidate_id in candidate_map}
     total_cast = 0.0
@@ -112,7 +151,7 @@ def resolve_praxis_vote(
     return VoteResolution(
         primogen_weights=primogen_weights,
         candidate_totals=candidate_totals,
-        opposition_transfers=transfers,
+        current_transfers=transfers,
         total_cast_influence=total_cast,
         recognition_threshold=required_score,
         winner_id=winner_id,

@@ -6,9 +6,10 @@ from typing import Iterable, Mapping
 
 from .actions import apply_action
 from .config import DEFAULT_RULES, GameRules
+from .ideology import build_currents, initialize_current_politics
 from .models import Candidate, GameAction, GameEvent, GameState, PrimogenVote
 from .offices import install_prince
-from .politics import VoteResolution, determine_opposition_stances, resolve_praxis_vote
+from .politics import VoteResolution, determine_current_stances, resolve_praxis_vote
 
 
 @dataclass(frozen=True)
@@ -44,6 +45,7 @@ def resolve_night(
     rules: GameRules = DEFAULT_RULES,
 ) -> NightResolution:
     next_state = deepcopy(state)
+    initialize_current_politics(next_state, rules)
     actions = _validate_action_budget(next_state, actions, rules)
     candidates = list(candidates)
     candidate_map = {candidate.id: candidate for candidate in candidates}
@@ -51,27 +53,29 @@ def resolve_night(
     for action in actions:
         next_state.events.append(apply_action(next_state, action, rules))
 
+    initialize_current_politics(next_state, rules)
     vote_result: VoteResolution | None = None
     if next_state.prince_id is None:
-        stances = determine_opposition_stances(next_state, rules)
-        for clan_id, stance in stances.items():
-            clan_state = next_state.clan_states[clan_id]
+        stances = determine_current_stances(next_state, rules)
+        for current_id, stance in stances.items():
+            current = build_currents(next_state, stance.clan_id)[current_id]
             if stance.supports_primogen:
                 message = (
-                    f"L'opposition {clan_state.clan.name} soutient son Primogene "
-                    f"(loyaute {clan_state.opposition_loyalty:.0f})."
+                    f"Le courant {current.name} ({next_state.clan_states[stance.clan_id].clan.name}) "
+                    f"soutient son Primogene (score {stance.support_score:.0f})."
                 )
             else:
+                ally_name = next_state.characters[stance.allied_primogen_id].name
                 message = (
-                    f"L'opposition {clan_state.clan.name} refuse de suivre son Primogene et "
-                    "active son alliance politique preexistante."
+                    f"Le courant {current.name} ({next_state.clan_states[stance.clan_id].clan.name}) "
+                    f"refuse son Primogene et active son alliance avec {ally_name}."
                 )
             next_state.events.append(
-                GameEvent(night=next_state.night, category="opposition", message=message)
+                GameEvent(night=next_state.night, category="current", message=message)
             )
 
         vote_result = resolve_praxis_vote(
-            clans=[cs.clan for cs in next_state.clan_states.values()],
+            state=next_state,
             stances=stances,
             votes=votes,
             candidates=candidates,

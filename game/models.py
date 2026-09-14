@@ -5,29 +5,48 @@ from enum import Enum
 from typing import Optional
 
 
+class IdeologyQuadrant(str, Enum):
+    HUMANIST_TRADITIONAL = "humanist_traditional"
+    HUMANIST_REFORMIST = "humanist_reformist"
+    PREDATORY_TRADITIONAL = "predatory_traditional"
+    PREDATORY_RADICAL = "predatory_radical"
+
+
 @dataclass
 class Character:
     id: str
     name: str
     clan_id: Optional[str] = None
-    current_id: Optional[str] = None
     personal_influence: float = 0.0
     humanity: int = 7
+    humanism: float = 0.0
+    tradition: float = 0.0
     loyalty: float = 50.0
     ambition: float = 50.0
     is_primogen: bool = False
 
+    def __post_init__(self) -> None:
+        if not 0 <= self.humanity <= 10:
+            raise ValueError("Humanity must be between 0 and 10")
+        if not -100 <= self.humanism <= 100:
+            raise ValueError("Humanism must be between -100 and 100")
+        if not -100 <= self.tradition <= 100:
+            raise ValueError("Tradition must be between -100 and 100")
+        if self.personal_influence < 0:
+            raise ValueError("Personal influence cannot be negative")
 
-@dataclass
+
+@dataclass(frozen=True)
 class PoliticalCurrent:
     id: str
+    clan_id: str
     name: str
+    quadrant: IdeologyQuadrant
     influence: float
-    leader_name: str
-
-    def __post_init__(self) -> None:
-        if self.influence < 0:
-            raise ValueError("Current influence cannot be negative")
+    leader_id: Optional[str]
+    member_ids: tuple[str, ...]
+    centroid_humanism: float
+    centroid_tradition: float
 
 
 @dataclass
@@ -35,18 +54,14 @@ class Clan:
     id: str
     name: str
     primogen_id: str
-    dominant_current: PoliticalCurrent
-    opposition_current: PoliticalCurrent
-
-    @property
-    def total_influence(self) -> float:
-        return self.dominant_current.influence + self.opposition_current.influence
 
 
 @dataclass(frozen=True)
-class OppositionStance:
+class CurrentStance:
     clan_id: str
+    current_id: str
     supports_primogen: bool
+    support_score: float
     allied_primogen_id: Optional[str] = None
 
 
@@ -67,12 +82,9 @@ class Candidate:
 @dataclass
 class ClanPoliticalState:
     clan: Clan
-    opposition_loyalty: float
-    opposition_ally_id: str
+    current_loyalties: dict[str, float] = field(default_factory=dict)
+    current_allies: dict[str, str] = field(default_factory=dict)
     relations: dict[str, float] = field(default_factory=dict)
-
-    def __post_init__(self) -> None:
-        self.opposition_loyalty = max(0.0, min(100.0, self.opposition_loyalty))
 
 
 @dataclass(frozen=True)
@@ -133,3 +145,4 @@ class GameAction:
     clan_id: str
     action_type: ActionType
     target_clan_id: Optional[str] = None
+    target_current_id: Optional[str] = None

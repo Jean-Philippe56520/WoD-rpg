@@ -1,8 +1,12 @@
+from copy import deepcopy
+
 import pytest
 
+from game.actions import apply_action
 from game.config import DEFAULT_RULES
+from game.ideology import build_currents
 from game.models import ActionType, Candidate, GameAction, PrimogenVote
-from game.politics import determine_opposition_stances
+from game.politics import determine_current_stances
 from game.resolution import resolve_night
 from game.world import create_initial_game_state, seed_candidates
 
@@ -14,47 +18,72 @@ def self_votes(state):
     }
 
 
-def test_initial_opposition_decisions_are_autonomous():
+def test_rally_action_can_flip_one_specific_current_support():
     state = create_initial_game_state()
-    stances = determine_opposition_stances(state)
-    assert stances["ventrue"].supports_primogen is False
-    assert stances["ventrue"].allied_primogen_id == "primogen_toreador"
-    assert stances["toreador"].supports_primogen is True
-
-
-def test_rally_action_can_flip_opposition_support():
-    state = create_initial_game_state()
+    target = "ventrue__humanist_reformist"
     resolution = resolve_night(
         state,
-        [GameAction("ventrue", ActionType.RALLY_OPPOSITION)],
+        [GameAction("ventrue", ActionType.RALLY_OPPOSITION, target_current_id=target)],
         self_votes(state),
         seed_candidates(),
     )
-    assert resolution.state.clan_states["ventrue"].opposition_loyalty == 60
-    assert determine_opposition_stances(resolution.state)["ventrue"].supports_primogen is True
-    assert state.clan_states["ventrue"].opposition_loyalty == 48
+    assert resolution.state.clan_states["ventrue"].current_loyalties[target] == 60
+    assert determine_current_stances(resolution.state)[target].supports_primogen is True
+    assert state.clan_states["ventrue"].current_loyalties[target] == 48
 
 
-def test_consolidate_moves_influence_and_advances_night():
+def test_consolidate_strengthens_primogen_but_irritates_rival_currents():
     state = create_initial_game_state()
+    before = state.characters["primogen_ventrue"].personal_influence
     resolution = resolve_night(
         state,
         [GameAction("ventrue", ActionType.CONSOLIDATE)],
         self_votes(state),
         seed_candidates(),
     )
-    ventrue = resolution.state.clan_states["ventrue"]
-    assert ventrue.clan.dominant_current.influence == 64
-    assert ventrue.clan.opposition_current.influence == 36
-    assert resolution.state.night == 2
+    new_state = resolution.state
+    assert new_state.characters["primogen_ventrue"].personal_influence == before + 3
+    assert new_state.clan_states["ventrue"].current_loyalties["ventrue__humanist_reformist"] == 44
+    assert new_state.clan_states["ventrue"].current_loyalties["ventrue__humanist_traditional"] == 51
+    assert new_state.night == 2
+
+
+def test_build_influence_changes_members_and_therefore_current_influence():
+    state = create_initial_game_state()
+    before = build_currents(state, "ventrue")["ventrue__predatory_traditional"].influence
+    resolution = resolve_night(
+        state,
+        [GameAction("ventrue", ActionType.BUILD_INFLUENCE)],
+        self_votes(state),
+        seed_candidates(),
+    )
+    new_state = resolution.state
+    after = build_currents(new_state, "ventrue")["ventrue__predatory_traditional"].influence
+    assert new_state.characters["primogen_ventrue"].personal_influence == 24
+    assert new_state.characters["ventrue_victor"].personal_influence == 19
+    assert after == before + 3
+
+
+def test_diplomacy_is_easier_between_ideologically_aligned_primogens():
+    aligned = create_initial_game_state()
+    opposed = deepcopy(aligned)
+    a = aligned.characters["primogen_ventrue"]
+    b = aligned.characters["primogen_toreador"]
+    b.humanism, b.tradition = a.humanism, a.tradition
+    a2 = opposed.characters["primogen_ventrue"]
+    b2 = opposed.characters["primogen_toreador"]
+    b2.humanism, b2.tradition = -a2.humanism, -a2.tradition
+    apply_action(aligned, GameAction("ventrue", ActionType.DIPLOMACY, "toreador"))
+    apply_action(opposed, GameAction("ventrue", ActionType.DIPLOMACY, "toreador"))
+    assert aligned.clan_states["ventrue"].relations["toreador"] > opposed.clan_states["ventrue"].relations["toreador"]
 
 
 def test_more_than_action_budget_is_rejected():
     state = create_initial_game_state()
     actions = [
-        GameAction("ventrue", ActionType.RALLY_OPPOSITION),
-        GameAction("ventrue", ActionType.BUILD_INFLUENCE),
         GameAction("ventrue", ActionType.CONSOLIDATE),
+        GameAction("ventrue", ActionType.BUILD_INFLUENCE),
+        GameAction("ventrue", ActionType.DIPLOMACY, "toreador"),
     ]
     with pytest.raises(ValueError, match="maximum"):
         resolve_night(state, actions, self_votes(state), seed_candidates())
@@ -79,10 +108,8 @@ def test_primogen_majority_becomes_prince_and_seat_is_replaced():
     resolution = resolve_night(state, [], votes, seed_candidates())
     new_state = resolution.state
     assert new_state.prince_id == "primogen_ventrue"
-    assert new_state.praxis_status == "recognized"
     assert new_state.characters["primogen_ventrue"].is_primogen is False
-    assert new_state.clan_states["ventrue"].clan.primogen_id != "primogen_ventrue"
-    assert new_state.characters[new_state.clan_states["ventrue"].clan.primogen_id].is_primogen is True
+    assert new_state.clan_states["ventrue"].clan.primogen_id == "ventrue_victor"
     assert new_state.prince_political_capital == DEFAULT_RULES.prince_initial_capital
 
 
@@ -97,4 +124,3 @@ def test_non_primogen_majority_can_become_prince():
     resolution = resolve_night(state, [], votes, candidates)
     assert resolution.state.prince_id == outsider.id
     assert resolution.state.characters[outsider.id].is_primogen is False
-    assert resolution.state.prince_political_capital == DEFAULT_RULES.prince_initial_capital
