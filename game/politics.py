@@ -3,7 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable, Mapping
 
-from .models import Candidate, Clan, OppositionStance, PrimogenVote
+from .config import DEFAULT_RULES, GameRules
+from .models import Candidate, Clan, GameState, OppositionStance, PrimogenVote
 
 
 @dataclass(frozen=True)
@@ -11,6 +12,8 @@ class VoteResolution:
     primogen_weights: dict[str, float]
     candidate_totals: dict[str, float]
     opposition_transfers: list[dict[str, float | str]]
+    total_cast_influence: float
+    recognition_threshold: float
     winner_id: str | None
     disputed: bool
 
@@ -24,29 +27,51 @@ def _validate_unique_clans(clans: Iterable[Clan]) -> dict[str, Clan]:
     return clan_map
 
 
+def determine_opposition_stances(
+    state: GameState,
+    rules: GameRules = DEFAULT_RULES,
+) -> dict[str, OppositionStance]:
+    """Let each opposition decide whether it follows its Primogen.
+
+    V0.2 deliberately keeps the decision model readable: the leader follows the
+    Primogen when the opposition's loyalty reaches the configurable threshold.
+    The allied Primogen is persistent state and is used only when dissent occurs.
+    """
+    stances: dict[str, OppositionStance] = {}
+    for clan_id, clan_state in state.clan_states.items():
+        supports = clan_state.opposition_loyalty >= rules.opposition_support_threshold
+        stances[clan_id] = OppositionStance(
+            clan_id=clan_id,
+            supports_primogen=supports,
+            allied_primogen_id=None if supports else clan_state.opposition_ally_id,
+        )
+    return stances
+
+
 def resolve_praxis_vote(
     clans: Iterable[Clan],
     stances: Mapping[str, OppositionStance],
     votes: Mapping[str, PrimogenVote],
     candidates: Iterable[Candidate],
     opposition_transfer_ratio: float = 0.5,
+    recognition_threshold: float = 0.5,
 ) -> VoteResolution:
-    """Resolve a weighted Prince vote.
+    """Resolve the Primogens' weighted vote for recognition of a Praxis.
 
-    Each Primogen initially carries the full influence of their clan. If the
-    opposition refuses to support its Primogen, a configured share of the
-    opposition current is removed from that Primogen's vote weight and added
-    to the vote weight of the opposition leader's pre-selected allied Primogen.
+    If an opposition dissents, a configured share of its influence leaves its
+    Primogen's voting weight and reinforces a pre-selected allied Primogen. The
+    transferred influence follows that allied Primogen's candidate choice.
 
-    The transferred influence follows the allied Primogen's candidate choice;
-    it is not cast directly for a candidate by the opposition.
+    A plurality is not enough: a candidate is recognised only when their score
+    is strictly greater than the configured share of all influence actually cast.
     """
     if not 0 <= opposition_transfer_ratio <= 1:
         raise ValueError("opposition_transfer_ratio must be between 0 and 1")
+    if not 0 <= recognition_threshold < 1:
+        raise ValueError("recognition_threshold must be between 0 (inclusive) and 1")
 
     clan_map = _validate_unique_clans(clans)
     candidate_map = {candidate.id: candidate for candidate in candidates}
-
     primogen_to_clan = {clan.primogen_id: clan for clan in clan_map.values()}
     primogen_weights = {
         clan.primogen_id: clan.total_influence for clan in clan_map.values()
@@ -82,6 +107,7 @@ def resolve_praxis_vote(
         )
 
     candidate_totals = {candidate_id: 0.0 for candidate_id in candidate_map}
+    total_cast = 0.0
     for primogen_id, weight in primogen_weights.items():
         vote = votes.get(primogen_id)
         if vote is None:
@@ -89,24 +115,22 @@ def resolve_praxis_vote(
         if vote.candidate_id not in candidate_map:
             raise ValueError(f"Unknown candidate: {vote.candidate_id}")
         candidate_totals[vote.candidate_id] += weight
+        total_cast += weight
 
-    if not candidate_totals:
-        return VoteResolution(
-            primogen_weights=primogen_weights,
-            candidate_totals=candidate_totals,
-            opposition_transfers=transfers,
-            winner_id=None,
-            disputed=True,
-        )
-
-    max_score = max(candidate_totals.values())
-    winners = [cid for cid, score in candidate_totals.items() if score == max_score]
-    winner_id = winners[0] if len(winners) == 1 and max_score > 0 else None
+    required_score = total_cast * recognition_threshold
+    winner_id: str | None = None
+    if total_cast > 0 and candidate_totals:
+        max_score = max(candidate_totals.values())
+        leaders = [cid for cid, score in candidate_totals.items() if score == max_score]
+        if len(leaders) == 1 and max_score > required_score:
+            winner_id = leaders[0]
 
     return VoteResolution(
         primogen_weights=primogen_weights,
         candidate_totals=candidate_totals,
         opposition_transfers=transfers,
+        total_cast_influence=total_cast,
+        recognition_threshold=required_score,
         winner_id=winner_id,
         disputed=winner_id is None,
     )

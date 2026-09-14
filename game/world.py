@@ -1,6 +1,13 @@
 from __future__ import annotations
 
-from .models import Candidate, Character, Clan, PoliticalCurrent
+from .models import (
+    Candidate,
+    Character,
+    Clan,
+    ClanPoliticalState,
+    GameState,
+    PoliticalCurrent,
+)
 
 
 def seed_characters() -> dict[str, Character]:
@@ -66,3 +73,28 @@ def seed_candidates() -> list[Candidate]:
         )
         for char in chars.values()
     ]
+
+
+def create_initial_game_state() -> GameState:
+    clans = {clan.id: clan for clan in seed_clans()}
+    clan_states = {
+        "ventrue": ClanPoliticalState(
+            clan=clans["ventrue"],
+            opposition_loyalty=48,
+            opposition_ally_id="primogen_toreador",
+            relations={"toreador": 5, "brujah": 0},
+        ),
+        "toreador": ClanPoliticalState(
+            clan=clans["toreador"],
+            opposition_loyalty=58,
+            opposition_ally_id="primogen_ventrue",
+            relations={"ventrue": 5, "brujah": 5},
+        ),
+        "brujah": ClanPoliticalState(
+            clan=clans["brujah"],
+            opposition_loyalty=54,
+            opposition_ally_id="primogen_toreador",
+            relations={"ventrue": 0, "toreador": 5},
+        ),
+    }
+    return GameState(clan_states=clan_states)
