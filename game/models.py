@@ -92,6 +92,10 @@ class GameEvent:
     night: int
     category: str
     message: str
+    audience_clan_ids: tuple[str, ...] | None = None
+
+    def visible_to(self, clan_id: str) -> bool:
+        return self.audience_clan_ids is None or clan_id in self.audience_clan_ids
 
 
 class PrimogenPosition(str, Enum):
@@ -114,6 +118,7 @@ class EmbraceRequest:
     primogen_position: PrimogenPosition
     political_cost: float
     created_night: int
+    submitted_by_primogen_id: Optional[str] = None
     status: EmbraceStatus = EmbraceStatus.PENDING
     decision_night: Optional[int] = None
 
@@ -146,3 +151,32 @@ class GameAction:
     action_type: ActionType
     target_clan_id: Optional[str] = None
     target_current_id: Optional[str] = None
+
+
+class NightStatus(str, Enum):
+    OPEN = "open"
+    READY = "ready"
+    RESOLVING = "resolving"
+    RESOLVED = "resolved"
+
+
+@dataclass(frozen=True)
+class EmbracePetitionOrder:
+    member_id: str
+    proposed_childe_name: str
+
+
+@dataclass(frozen=True)
+class ClanNightOrders:
+    clan_id: str
+    actions: tuple[GameAction, ...]
+    vote: PrimogenVote | None = None
+    embrace_petitions: tuple[EmbracePetitionOrder, ...] = ()
+
+
+@dataclass(frozen=True)
+class ClanNightReport:
+    game_id: str
+    night: int
+    clan_id: str
+    items: tuple[str, ...]

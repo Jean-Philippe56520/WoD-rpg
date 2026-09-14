@@ -3,12 +3,9 @@ from __future__ import annotations
 from copy import deepcopy
 
 from .config import DEFAULT_RULES, GameRules
-from .ideology import (
-    character_current_id,
-    initialize_current_politics,
-    primogen_current_id,
-)
+from .ideology import character_current_id, initialize_current_politics, primogen_current_id
 from .models import (
+    EmbracePetitionOrder,
     EmbraceRequest,
     EmbraceStatus,
     GameEvent,
@@ -71,12 +68,23 @@ def create_embrace_request(
     requester_id: str,
     proposed_childe_name: str,
     primogen_position: PrimogenPosition,
+    submitted_by_primogen_id: str | None = None,
     rules: GameRules = DEFAULT_RULES,
 ) -> GameState:
     if not proposed_childe_name.strip():
         raise ValueError("A proposed childe name is required")
 
     next_state = deepcopy(state)
+    requester = next_state.characters.get(requester_id)
+    if requester is None or not requester.clan_id:
+        raise ValueError("Requester must be a known clan member")
+    current_primogen_id = next_state.clan_states[requester.clan_id].clan.primogen_id
+    submitted_by_primogen_id = submitted_by_primogen_id or current_primogen_id
+    if submitted_by_primogen_id != current_primogen_id:
+        raise ValueError("Only the current Primogen may submit a clan request to the Prince")
+    if requester_id == current_primogen_id:
+        raise ValueError("The Primogen must submit the request on behalf of another clan member")
+
     cost = calculate_embrace_cost(next_state, requester_id, primogen_position, rules)
     request_id = f"embrace_{len(next_state.embrace_requests) + 1}"
     request = EmbraceRequest(
@@ -86,17 +94,19 @@ def create_embrace_request(
         primogen_position=primogen_position,
         political_cost=cost,
         created_night=next_state.night,
+        submitted_by_primogen_id=submitted_by_primogen_id,
     )
     next_state.embrace_requests[request.id] = request
-    requester = next_state.characters[requester_id]
+    primogen = next_state.characters[submitted_by_primogen_id]
     next_state.events.append(
         GameEvent(
             night=next_state.night,
             category="embrace",
             message=(
-                f"{requester.name} demande au Prince l'autorisation d'Etreindre "
-                f"{request.proposed_childe_name}. Cout politique estime : {cost:.0f}."
+                f"{primogen.name}, au nom de {requester.name}, demande au Prince l'autorisation "
+                f"d'Etreindre {request.proposed_childe_name}. Cout politique estime : {cost:.0f}."
             ),
+            audience_clan_ids=(requester.clan_id,),
         )
     )
     return next_state
@@ -173,9 +183,7 @@ def decide_embrace_request(
     )
 
     if requester_current and requester_current != primary_current:
-        before = clan_state.current_loyalties.get(
-            requester_current, rules.current_default_loyalty
-        )
+        before = clan_state.current_loyalties.get(requester_current, rules.current_default_loyalty)
         clan_state.current_loyalties[requester_current] = _clamp(
             before + _rival_loyalty_delta(approve, request.primogen_position, rules)
         )
@@ -187,9 +195,44 @@ def decide_embrace_request(
             night=next_state.night,
             category="embrace",
             message=(
-                f"{prince.name} {decision_word} la demande d'Etreinte de {requester.name} "
-                f"concernant {request.proposed_childe_name}."
+                f"{prince.name} {decision_word} la demande portee par le Primogene de "
+                f"{requester.name} concernant {request.proposed_childe_name}."
             ),
+            audience_clan_ids=(requester.clan_id,),
         )
     )
     return next_state
+
+
+def process_primogen_petition(
+    state: GameState,
+    clan_id: str,
+    petition: EmbracePetitionOrder,
+    rules: GameRules = DEFAULT_RULES,
+) -> GameState:
+    if state.prince_id is None:
+        raise ValueError("No Prince is installed")
+    if clan_id not in state.clan_states:
+        raise ValueError(f"Unknown clan: {clan_id}")
+    member = state.characters.get(petition.member_id)
+    if member is None or member.clan_id != clan_id:
+        raise ValueError("The Primogen may only petition for a member of their own clan")
+    primogen_id = state.clan_states[clan_id].clan.primogen_id
+    if member.id == primogen_id:
+        raise ValueError("The petition must be on behalf of another clan member")
+
+    next_state = create_embrace_request(
+        state,
+        requester_id=member.id,
+        proposed_childe_name=petition.proposed_childe_name,
+        primogen_position=PrimogenPosition.SUPPORT,
+        submitted_by_primogen_id=primogen_id,
+        rules=rules,
+    )
+    request = list(next_state.embrace_requests.values())[-1]
+    relation = next_state.prince_relations.get(clan_id, 0.0)
+    approve = (
+        next_state.prince_political_capital >= request.political_cost
+        and relation >= rules.prince_auto_refusal_relation_floor
+    )
+    return decide_embrace_request(next_state, request.id, approve, rules)

@@ -4,6 +4,9 @@ from .ideology import initialize_current_politics
 from .models import Candidate, Character, Clan, ClanPoliticalState, GameState
 
 
+REQUIRED_CLANS = ("ventrue", "toreador", "brujah")
+
+
 def seed_characters() -> dict[str, Character]:
     return {
         "primogen_ventrue": Character(

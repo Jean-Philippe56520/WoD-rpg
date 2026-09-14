@@ -1,12 +1,7 @@
 from __future__ import annotations
 
 from .config import DEFAULT_RULES, GameRules
-from .ideology import (
-    build_currents,
-    character_affinity,
-    initialize_current_politics,
-    primogen_current_id,
-)
+from .ideology import build_currents, character_affinity, initialize_current_politics, primogen_current_id
 from .models import ActionType, GameAction, GameEvent, GameState
 
 
@@ -48,8 +43,7 @@ def apply_action(
             )
         message = (
             f"{clan.name} consolide le courant du Primogene : influence personnelle de "
-            f"{primogen.name} +{rules.consolidate_influence_gain:.0f}, au prix d'une tension "
-            "avec les courants rivaux."
+            f"{primogen.name} +{rules.consolidate_influence_gain:.0f}, avec davantage de tension interne."
         )
 
     elif action.action_type == ActionType.RALLY_OPPOSITION:
@@ -58,12 +52,8 @@ def apply_action(
             raise ValueError("Rallying requires a rival current")
         if target_id not in currents:
             raise ValueError(f"Unknown target current: {target_id}")
-        before = clan_state.current_loyalties.get(
-            target_id, rules.current_default_loyalty
-        )
-        clan_state.current_loyalties[target_id] = _clamp(
-            before + rules.rally_current_loyalty_gain
-        )
+        before = clan_state.current_loyalties.get(target_id, rules.current_default_loyalty)
+        clan_state.current_loyalties[target_id] = _clamp(before + rules.rally_current_loyalty_gain)
         gained = clan_state.current_loyalties[target_id] - before
         message = (
             f"{clan.name} rallie le courant {currents[target_id].name} : "
@@ -82,9 +72,7 @@ def apply_action(
             peer = max(peers, key=lambda member: (member.personal_influence, member.id))
             peer.personal_influence += rules.influence_gain_peer
             peer_name = peer.name
-        total_gain = rules.influence_gain_primogen + (
-            rules.influence_gain_peer if peer_name else 0.0
-        )
+        total_gain = rules.influence_gain_primogen + (rules.influence_gain_peer if peer_name else 0.0)
         message = f"{clan.name} mobilise ses reseaux : influence personnelle cumulee +{total_gain:.0f}."
         if peer_name:
             message += f" {peer_name} profite egalement de cette mobilisation."
@@ -112,4 +100,9 @@ def apply_action(
     else:
         raise ValueError(f"Unsupported action type: {action.action_type}")
 
-    return GameEvent(night=state.night, category="action", message=message)
+    return GameEvent(
+        night=state.night,
+        category="action",
+        message=message,
+        audience_clan_ids=(action.clan_id,),
+    )

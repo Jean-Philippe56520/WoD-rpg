@@ -1,11 +1,7 @@
 from __future__ import annotations
 
 from .config import DEFAULT_RULES, GameRules
-from .ideology import (
-    build_currents,
-    character_current_id,
-    initialize_current_politics,
-)
+from .ideology import build_currents, character_current_id, initialize_current_politics
 from .models import Candidate, Character, GameEvent, GameState
 
 
@@ -49,17 +45,10 @@ def choose_successor(
     ]
     if not eligible:
         raise ValueError(f"No eligible successor for clan {clan_id}")
-    return max(
-        eligible,
-        key=lambda character: (succession_score(state, character, rules), character.id),
-    )
+    return max(eligible, key=lambda character: (succession_score(state, character, rules), character.id))
 
 
-def _apply_succession(
-    state: GameState,
-    outgoing: Character,
-    rules: GameRules,
-) -> Character:
+def _apply_succession(state: GameState, outgoing: Character, rules: GameRules) -> Character:
     if not outgoing.clan_id:
         raise ValueError("A Primogen must belong to a clan")
     clan_state = state.clan_states[outgoing.clan_id]
@@ -73,9 +62,7 @@ def _apply_succession(
     successor_current_id = character_current_id(successor)
 
     if outgoing_current_id and successor_current_id != outgoing_current_id:
-        clan_state.current_loyalties.setdefault(
-            outgoing_current_id, rules.succession_loyalty_reset
-        )
+        clan_state.current_loyalties.setdefault(outgoing_current_id, rules.succession_loyalty_reset)
 
     for other_state in state.clan_states.values():
         for current_id, ally_id in list(other_state.current_allies.items()):

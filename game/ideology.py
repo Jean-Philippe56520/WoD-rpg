@@ -47,7 +47,6 @@ def ideological_affinity_values(
     humanism_b: float,
     tradition_b: float,
 ) -> float:
-    """Return -100 (opposites) to +100 (identical) ideological affinity."""
     distance = abs(humanism_a - humanism_b) + abs(tradition_a - tradition_b)
     return max(-100.0, min(100.0, 100.0 - distance / 2.0))
 
@@ -150,30 +149,23 @@ def initialize_current_politics(
     state: GameState,
     rules: GameRules = DEFAULT_RULES,
 ) -> None:
-    """Ensure every active rival current has persistent loyalty and an ally."""
     for clan_id, clan_state in state.clan_states.items():
         currents = build_currents(state, clan_id)
         primary_id = primogen_current_id(state, clan_id)
         for current_id, current in currents.items():
             if current_id == primary_id:
                 continue
-            clan_state.current_loyalties.setdefault(
-                current_id, rules.current_default_loyalty
-            )
+            clan_state.current_loyalties.setdefault(current_id, rules.current_default_loyalty)
             clan_state.current_allies.setdefault(
                 current_id,
                 _default_allied_primogen(state, clan_id, current),
             )
         active_ids = set(currents)
         clan_state.current_loyalties = {
-            key: value
-            for key, value in clan_state.current_loyalties.items()
-            if key in active_ids
+            key: value for key, value in clan_state.current_loyalties.items() if key in active_ids
         }
         clan_state.current_allies = {
-            key: value
-            for key, value in clan_state.current_allies.items()
-            if key in active_ids
+            key: value for key, value in clan_state.current_allies.items() if key in active_ids
         }
 
 

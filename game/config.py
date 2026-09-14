@@ -9,6 +9,7 @@ class GameRules:
     ideology_support_scale: float = 0.15
     praxis_recognition_threshold: float = 0.50
     actions_per_clan: int = 2
+    embrace_petitions_per_clan: int = 1
 
     consolidate_influence_gain: float = 3.0
     consolidate_rival_loyalty_penalty: float = 4.0
@@ -39,6 +40,7 @@ class GameRules:
     embrace_primogen_oppose_modifier: float = 4.0
     embrace_minimum_cost: float = 1.0
     embrace_requester_influence_gain: float = 2.0
+    prince_auto_refusal_relation_floor: float = -10.0
 
     approve_relation_support: float = 3.0
     approve_relation_neutral: float = 0.0
