@@ -5,6 +5,13 @@ import streamlit as st
 from game.actions import ACTION_LABELS
 from game.config import DEFAULT_RULES
 from game.embrace import create_embrace_request, decide_embrace_request
+from game.ideology import (
+    build_currents,
+    character_current_id,
+    clan_total_influence,
+    ideological_affinity_values,
+    primogen_current_id,
+)
 from game.models import (
     ActionType,
     Candidate,
@@ -13,14 +20,14 @@ from game.models import (
     PrimogenPosition,
     PrimogenVote,
 )
-from game.politics import determine_opposition_stances
+from game.politics import determine_current_stances
 from game.resolution import resolve_night
 from game.world import candidates_from_state, create_initial_game_state
 
 
 st.set_page_config(page_title="WoD RPG - Chronique politique", page_icon="🩸", layout="wide")
 st.title("WoD RPG - Chronique politique")
-st.caption("V0.3 - Brujah - Toreador - Ventrue - Prince, successions et Etreintes")
+st.caption("V0.4 - Brujah - Toreador - Ventrue - ideologies et courants dynamiques")
 
 if "game_state" not in st.session_state:
     st.session_state.game_state = create_initial_game_state()
@@ -30,6 +37,7 @@ if "last_resolution" not in st.session_state:
     st.session_state.last_resolution = None
 
 state = st.session_state.game_state
+stances = determine_current_stances(state)
 
 with st.sidebar:
     st.header("Chronique")
@@ -67,17 +75,17 @@ primogen_labels = {
     clan_state.clan.primogen_id: state.characters[clan_state.clan.primogen_id].name
     for clan_state in state.clan_states.values()
 }
-stances = determine_opposition_stances(state)
 
 night_tab, clans_tab, prince_tab, chronicle_tab = st.tabs(
-    ["Nuit politique", "Clans", "Cour du Prince", "Chronique"]
+    ["Nuit politique", "Clans et courants", "Cour du Prince", "Chronique"]
 )
 
 with night_tab:
     st.subheader(f"Preparation de la nuit {state.night}")
     st.info(
         f"Chaque clan dispose de {DEFAULT_RULES.actions_per_clan} actions. "
-        "L'opposition choisit elle-meme si elle suit son Primogene."
+        "Chaque courant decide separement s'il soutient le Primogene. "
+        "Les proximites ideologiques modifient naturellement ce soutien."
     )
     cols = st.columns(3)
     actions: list[GameAction] = []
@@ -86,29 +94,42 @@ with night_tab:
     for col, clan_state in zip(cols, state.clan_states.values()):
         clan = clan_state.clan
         primogen = state.characters[clan.primogen_id]
+        currents = build_currents(state, clan.id)
+        primary_id = primogen_current_id(state, clan.id)
         with col:
             st.markdown(f"### {clan.name}")
             st.write(f"**Primogene :** {primogen.name}")
-            st.metric("Influence totale", f"{clan.total_influence:.0f}")
-            st.write(
-                f"Courant du Primogene : **{clan.dominant_current.influence:.0f}**  \n"
-                f"Opposition ({clan.opposition_current.leader_name}) : "
-                f"**{clan.opposition_current.influence:.0f}**"
+            st.metric("Influence totale", f"{clan_total_influence(state, clan.id):.0f}")
+            st.caption(
+                f"Axes du Primogene : Humanisme {primogen.humanism:+.0f} / "
+                f"Tradition {primogen.tradition:+.0f}"
             )
-            st.progress(
-                clan_state.opposition_loyalty / 100,
-                text=f"Loyaute opposition : {clan_state.opposition_loyalty:.0f}/100",
-            )
-            stance = stances[clan.id]
-            if stance.supports_primogen:
-                st.success("Opposition : soutien probable")
-            else:
-                ally_name = primogen_labels.get(
-                    clan_state.opposition_ally_id, clan_state.opposition_ally_id
+
+            for current_id, current in sorted(
+                currents.items(), key=lambda item: item[1].influence, reverse=True
+            ):
+                stance = stances[current_id]
+                prefix = "Primogene" if current_id == primary_id else "Courant"
+                st.write(
+                    f"**{prefix} - {current.name}** : {current.influence:.0f} influence"
                 )
-                st.warning(f"Opposition : dissidence probable - allie : {ally_name}")
+                if current_id != primary_id:
+                    if stance.supports_primogen:
+                        st.success(f"Soutien probable - score {stance.support_score:.0f}/100")
+                    else:
+                        ally = primogen_labels.get(
+                            stance.allied_primogen_id, stance.allied_primogen_id
+                        )
+                        st.warning(
+                            f"Dissidence probable - score {stance.support_score:.0f}/100 - "
+                            f"allie : {ally}"
+                        )
 
             action_options = list(ActionType)
+            rival_current_ids = [cid for cid in currents if cid != primary_id]
+            if not rival_current_ids:
+                action_options.remove(ActionType.RALLY_OPPOSITION)
+
             for index in range(DEFAULT_RULES.actions_per_clan):
                 action_type = st.selectbox(
                     f"Action {index + 1}",
@@ -117,15 +138,30 @@ with night_tab:
                     key=f"action_{state.night}_{clan.id}_{index}",
                 )
                 target_clan_id = None
+                target_current_id = None
                 if action_type == ActionType.DIPLOMACY:
                     targets = [cid for cid in state.clan_states if cid != clan.id]
                     target_clan_id = st.selectbox(
                         "Clan cible",
                         options=targets,
                         format_func=lambda cid: state.clan_states[cid].clan.name,
-                        key=f"target_{state.night}_{clan.id}_{index}",
+                        key=f"target_clan_{state.night}_{clan.id}_{index}",
                     )
-                actions.append(GameAction(clan.id, action_type, target_clan_id))
+                elif action_type == ActionType.RALLY_OPPOSITION:
+                    target_current_id = st.selectbox(
+                        "Courant a rallier",
+                        options=rival_current_ids,
+                        format_func=lambda cid: currents[cid].name,
+                        key=f"target_current_{state.night}_{clan.id}_{index}",
+                    )
+                actions.append(
+                    GameAction(
+                        clan_id=clan.id,
+                        action_type=action_type,
+                        target_clan_id=target_clan_id,
+                        target_current_id=target_current_id,
+                    )
+                )
 
             if state.prince_id is None:
                 candidate_ids = list(candidate_labels)
@@ -157,38 +193,78 @@ with night_tab:
         ):
             if score > 0:
                 st.write(f"**{candidate_labels.get(candidate_id, candidate_id)}** : {score:.1f}")
+        if vote.current_transfers:
+            st.markdown("**Dissidences de courants**")
+            for transfer in vote.current_transfers:
+                current = build_currents(
+                    state, str(transfer["from_clan_id"])
+                ).get(str(transfer["from_current_id"]))
+                current_name = current.name if current else str(transfer["from_current_id"])
+                ally_name = primogen_labels.get(
+                    str(transfer["to_primogen_id"]), str(transfer["to_primogen_id"])
+                )
+                st.caption(
+                    f"{current_name} : {float(transfer['amount']):.1f} influence "
+                    f"renforce le vote de {ally_name}."
+                )
         st.caption(
             f"Majorite necessaire : strictement plus de {vote.recognition_threshold:.1f} "
             f"sur {vote.total_cast_influence:.1f}."
         )
 
 with clans_tab:
-    st.subheader("Equilibres internes")
+    st.subheader("Courants ideologiques dynamiques")
+    st.caption(
+        "Humanite V5 et orientation politique sont distinctes. Humanisme et Tradition vont de -100 a +100 ; "
+        "le quadrant determine automatiquement le courant."
+    )
     for clan_state in state.clan_states.values():
         clan = clan_state.clan
         primogen = state.characters[clan.primogen_id]
+        currents = build_currents(state, clan.id)
+        primary_id = primogen_current_id(state, clan.id)
         with st.expander(f"{clan.name} - Primogene : {primogen.name}", expanded=True):
+            for current_id, current in sorted(
+                currents.items(), key=lambda item: item[1].influence, reverse=True
+            ):
+                leader_name = (
+                    state.characters[current.leader_id].name if current.leader_id else "Aucun"
+                )
+                label = "COURANT DU PRIMOGENE" if current_id == primary_id else "COURANT RIVAL"
+                st.markdown(
+                    f"**{current.name}** - {label} - influence **{current.influence:.0f}** - "
+                    f"chef : **{leader_name}**"
+                )
+                st.caption(
+                    f"Centre ideologique : Humanisme {current.centroid_humanism:+.0f} / "
+                    f"Tradition {current.centroid_tradition:+.0f}"
+                )
+                if current_id != primary_id:
+                    stance = stances[current_id]
+                    ally = clan_state.current_allies.get(current_id)
+                    st.caption(
+                        f"Loyaute politique : {clan_state.current_loyalties.get(current_id, 50):.0f} - "
+                        f"score avec affinite : {stance.support_score:.0f} - "
+                        f"allie externe : {primogen_labels.get(ally, ally)}"
+                    )
+                member_names = [state.characters[mid].name for mid in current.member_ids]
+                st.caption("Membres : " + ", ".join(member_names))
+                st.divider()
+
+            st.markdown("**Membres du clan**")
             members = [
                 character
                 for character in state.characters.values()
                 if character.clan_id == clan.id
             ]
             for member in sorted(members, key=lambda char: char.personal_influence, reverse=True):
+                current = currents[character_current_id(member)]
                 role = "Primogene" if member.is_primogen else "Membre"
-                current = (
-                    "courant du Primogene"
-                    if member.current_id == clan.dominant_current.id
-                    else "opposition"
-                )
                 st.write(
-                    f"**{member.name}** - {role} - {current} - "
-                    f"influence {member.personal_influence:.0f} - Humanite {member.humanity} - "
-                    f"ambition {member.ambition:.0f}"
+                    f"**{member.name}** - {role} - {current.name} - influence {member.personal_influence:.0f} - "
+                    f"Humanite {member.humanity} - Humanisme {member.humanism:+.0f} - "
+                    f"Tradition {member.tradition:+.0f} - ambition {member.ambition:.0f}"
                 )
-            st.caption(
-                f"Allie politique de l'opposition : "
-                f"{primogen_labels.get(clan_state.opposition_ally_id, clan_state.opposition_ally_id)}"
-            )
 
 with prince_tab:
     if state.prince_id is None:
@@ -215,6 +291,22 @@ with prince_tab:
             options=requester_ids,
             format_func=lambda cid: state.characters[cid].name,
             key="embrace_requester",
+        )
+        requester = state.characters[requester_id]
+        requester_current = build_currents(state, requester.clan_id)[
+            character_current_id(requester)
+        ]
+        clan_primogen = state.characters[
+            state.clan_states[requester.clan_id].clan.primogen_id
+        ]
+        affinity = ideological_affinity_values(
+            requester.humanism,
+            requester.tradition,
+            clan_primogen.humanism,
+            clan_primogen.tradition,
+        )
+        st.caption(
+            f"Courant : {requester_current.name} - affinite ideologique avec son Primogene : {affinity:+.0f}"
         )
         childe_name = st.text_input("Nom du futur infant", key="embrace_childe")
         position = st.selectbox(
@@ -273,9 +365,10 @@ with chronicle_tab:
     if not state.events:
         st.caption("Aucun evenement resolu pour le moment.")
     else:
-        for event in reversed(state.events[-30:]):
+        for event in reversed(state.events[-40:]):
             st.write(f"**Nuit {event.night} - {event.category.capitalize()}** - {event.message}")
 
 st.caption(
-    "V0.3 : etat conserve dans la session Streamlit. La persistance multijoueur distante viendra dans une version ulterieure."
+    "V0.4 : courants derives des membres et de leurs axes Humanisme / Tradition. "
+    "Etat conserve dans la session Streamlit ; persistance multijoueur distante ulterieure."
 )

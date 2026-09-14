@@ -3,6 +3,11 @@ from __future__ import annotations
 from copy import deepcopy
 
 from .config import DEFAULT_RULES, GameRules
+from .ideology import (
+    character_current_id,
+    initialize_current_politics,
+    primogen_current_id,
+)
 from .models import (
     EmbraceRequest,
     EmbraceStatus,
@@ -42,7 +47,6 @@ def calculate_embrace_cost(
         raise ValueError("The Prince cannot request their own authorisation")
 
     prince = state.characters[state.prince_id]
-    clan = state.clan_states[requester.clan_id].clan
     cost = rules.embrace_base_cost
 
     if prince.clan_id:
@@ -51,10 +55,12 @@ def calculate_embrace_cost(
         else:
             cost += rules.embrace_other_clan_modifier
 
-    if requester.current_id == clan.dominant_current.id:
-        cost += rules.embrace_dominant_current_modifier
-    elif requester.current_id == clan.opposition_current.id:
-        cost += rules.embrace_opposition_current_modifier
+    requester_current = character_current_id(requester)
+    primary_current = primogen_current_id(state, requester.clan_id)
+    if requester_current == primary_current:
+        cost += rules.embrace_primogen_current_modifier
+    else:
+        cost += rules.embrace_rival_current_modifier
 
     cost += _position_modifier(primogen_position, rules)
     return max(rules.embrace_minimum_cost, cost)
@@ -96,44 +102,36 @@ def create_embrace_request(
     return next_state
 
 
-def _relation_delta(
-    approve: bool,
-    position: PrimogenPosition,
-    rules: GameRules,
-) -> float:
-    if approve:
-        mapping = {
+def _relation_delta(approve: bool, position: PrimogenPosition, rules: GameRules) -> float:
+    mapping = {
+        True: {
             PrimogenPosition.SUPPORT: rules.approve_relation_support,
             PrimogenPosition.NEUTRAL: rules.approve_relation_neutral,
             PrimogenPosition.OPPOSE: rules.approve_relation_oppose,
-        }
-    else:
-        mapping = {
+        },
+        False: {
             PrimogenPosition.SUPPORT: rules.refuse_relation_support,
             PrimogenPosition.NEUTRAL: rules.refuse_relation_neutral,
             PrimogenPosition.OPPOSE: rules.refuse_relation_oppose,
-        }
-    return mapping[position]
+        },
+    }
+    return mapping[approve][position]
 
 
-def _opposition_loyalty_delta(
-    approve: bool,
-    position: PrimogenPosition,
-    rules: GameRules,
-) -> float:
-    if approve:
-        mapping = {
-            PrimogenPosition.SUPPORT: rules.opposition_loyalty_approve_support,
-            PrimogenPosition.NEUTRAL: rules.opposition_loyalty_approve_neutral,
-            PrimogenPosition.OPPOSE: rules.opposition_loyalty_approve_oppose,
-        }
-    else:
-        mapping = {
-            PrimogenPosition.SUPPORT: rules.opposition_loyalty_refuse_support,
-            PrimogenPosition.NEUTRAL: rules.opposition_loyalty_refuse_neutral,
-            PrimogenPosition.OPPOSE: rules.opposition_loyalty_refuse_oppose,
-        }
-    return mapping[position]
+def _rival_loyalty_delta(approve: bool, position: PrimogenPosition, rules: GameRules) -> float:
+    mapping = {
+        True: {
+            PrimogenPosition.SUPPORT: rules.rival_loyalty_approve_support,
+            PrimogenPosition.NEUTRAL: rules.rival_loyalty_approve_neutral,
+            PrimogenPosition.OPPOSE: rules.rival_loyalty_approve_oppose,
+        },
+        False: {
+            PrimogenPosition.SUPPORT: rules.rival_loyalty_refuse_support,
+            PrimogenPosition.NEUTRAL: rules.rival_loyalty_refuse_neutral,
+            PrimogenPosition.OPPOSE: rules.rival_loyalty_refuse_oppose,
+        },
+    }
+    return mapping[approve][position]
 
 
 def decide_embrace_request(
@@ -154,17 +152,15 @@ def decide_embrace_request(
 
     requester = next_state.characters[request.requester_id]
     clan_state = next_state.clan_states[requester.clan_id]
-    clan = clan_state.clan
+    requester_current = character_current_id(requester)
+    primary_current = primogen_current_id(next_state, requester.clan_id)
 
     if approve:
         if next_state.prince_political_capital < request.political_cost:
             raise ValueError("Insufficient Prince political capital")
         next_state.prince_political_capital -= request.political_cost
         request.status = EmbraceStatus.APPROVED
-        if requester.current_id == clan.dominant_current.id:
-            clan.dominant_current.influence += rules.embrace_current_influence_gain
-        elif requester.current_id == clan.opposition_current.id:
-            clan.opposition_current.influence += rules.embrace_current_influence_gain
+        requester.personal_influence += rules.embrace_requester_influence_gain
         decision_word = "autorise"
     else:
         request.status = EmbraceStatus.REFUSED
@@ -176,12 +172,15 @@ def decide_embrace_request(
         + _relation_delta(approve, request.primogen_position, rules)
     )
 
-    if requester.current_id == clan.opposition_current.id:
-        clan_state.opposition_loyalty = _clamp(
-            clan_state.opposition_loyalty
-            + _opposition_loyalty_delta(approve, request.primogen_position, rules)
+    if requester_current and requester_current != primary_current:
+        before = clan_state.current_loyalties.get(
+            requester_current, rules.current_default_loyalty
+        )
+        clan_state.current_loyalties[requester_current] = _clamp(
+            before + _rival_loyalty_delta(approve, request.primogen_position, rules)
         )
 
+    initialize_current_politics(next_state, rules)
     prince = next_state.characters[next_state.prince_id]
     next_state.events.append(
         GameEvent(
