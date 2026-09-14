@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import uuid
-from pathlib import Path
 
 import streamlit as st
 
@@ -16,7 +15,7 @@ from game.models import (
     PrimogenVote,
 )
 from game.multiplayer import DEFAULT_GAME_ID, MultiplayerGameService
-from game.persistence import SQLiteGameRepository
+from game.repository_factory import create_repository
 from game.world import candidates_from_state
 
 
@@ -26,11 +25,16 @@ st.caption("V0.5 - partie multijoueur asynchrone - un joueur, un clan, une nuit 
 
 
 @st.cache_resource
-def get_repository() -> SQLiteGameRepository:
-    return SQLiteGameRepository(Path("data") / "wod_rpg.sqlite3")
+def get_repository():
+    return create_repository(st.secrets)
 
 
-repo = get_repository()
+try:
+    repo, persistence_backend = get_repository()
+except RuntimeError as exc:
+    st.error(str(exc))
+    st.stop()
+
 service = MultiplayerGameService(repo)
 service.ensure_default_game()
 
@@ -49,6 +53,7 @@ with st.sidebar:
     st.header("Ville")
     st.metric("Nuit", game_info["current_night"])
     st.write(f"**Statut :** {game_info['night_status'].value.upper()}")
+    st.write(f"**Persistance :** {persistence_backend}")
     st.metric("Stabilite Camarilla", f"{state.camarilla_stability:.0f}%")
     st.metric("Integrite Mascarade", f"{state.masquerade_integrity:.0f}%")
     st.write(f"**Praxis :** {state.praxis_status}")
@@ -286,6 +291,6 @@ with reports_tab:
                 st.write(f"- {item}")
 
 st.caption(
-    "V0.5 : les ordres sont persistants dans SQLite local et resolus globalement lorsque les trois clans ont valide. "
-    "Pour une persistance durable sur Streamlit Cloud, la meme interface de depot sera branchee sur PostgreSQL/Supabase."
+    f"V0.5 : persistance active = {persistence_backend}. "
+    "Les ordres sont resolus globalement lorsque les trois clans ont valide leur nuit."
 )
