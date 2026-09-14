@@ -75,6 +75,13 @@ class MultiplayerGameService:
             return self.resolve_if_ready()
         return False
 
+    def withdraw_orders(self, player_id: str) -> None:
+        self.ensure_default_game()
+        assigned_clan = self.repository.get_player_clan(DEFAULT_GAME_ID, player_id)
+        if assigned_clan is None:
+            raise ValueError("Player has not claimed a clan")
+        self.repository.withdraw_orders(DEFAULT_GAME_ID, player_id, assigned_clan)
+
     def resolve_if_ready(self) -> bool:
         bundle = self.repository.try_begin_resolution(DEFAULT_GAME_ID)
         if bundle is None:

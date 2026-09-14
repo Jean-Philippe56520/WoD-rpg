@@ -1,6 +1,6 @@
--- WoD-rpg V0.5 - persistence distante Supabase/PostgreSQL.
+-- WoD-rpg V0.6 - persistance distante + identite Supabase Auth.
 -- Le moteur Python reste cote serveur. Aucun secret Supabase ne doit etre commite.
--- V0.5 conserve un player_id opaque ; Supabase Auth sera ajoute dans une etape separee.
+-- En production, player_id correspond a l UUID valide du compte Supabase Auth.
 
 create table if not exists public.wod_games (
   id text primary key,
@@ -131,75 +131,221 @@ begin
 end;
 $$;
 
-create or replace function public.wod_submit_orders(p_game_id text,p_player_id text,p_clan_id text,p_orders_json jsonb)
-returns text language plpgsql security definer set search_path = '' as $$
-declare v_night integer; v_status text; v_required text[]; v_count integer; v_assigned text;
+create or replace function public.wod_submit_orders(
+  p_game_id text,
+  p_player_id text,
+  p_clan_id text,
+  p_orders_json jsonb
+)
+returns text
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_night integer;
+  v_status text;
+  v_required text[];
+  v_count integer;
+  v_assigned text;
 begin
-  select g.current_night,g.required_clans into v_night,v_required from public.wod_games g where g.id=p_game_id for update;
+  select g.current_night,g.required_clans
+  into v_night,v_required
+  from public.wod_games g
+  where g.id=p_game_id
+  for update;
   if v_night is null then raise exception 'Unknown game'; end if;
-  select gp.clan_id into v_assigned from public.wod_game_players gp where gp.game_id=p_game_id and gp.player_id=p_player_id;
-  if v_assigned is null or v_assigned<>p_clan_id then raise exception 'Player is not assigned to this clan'; end if;
-  select n.status into v_status from public.wod_nights n where n.game_id=p_game_id and n.night_number=v_night for update;
+
+  select gp.clan_id into v_assigned
+  from public.wod_game_players gp
+  where gp.game_id=p_game_id and gp.player_id=p_player_id;
+  if v_assigned is null or v_assigned<>p_clan_id then
+    raise exception 'Player is not assigned to this clan';
+  end if;
+
+  select n.status into v_status
+  from public.wod_nights n
+  where n.game_id=p_game_id and n.night_number=v_night
+  for update;
   if v_status<>'open' then raise exception 'This night no longer accepts orders'; end if;
+
   insert into public.wod_night_submissions(game_id,night_number,clan_id,player_id,orders_json)
   values(p_game_id,v_night,p_clan_id,p_player_id,p_orders_json);
-  select count(*) into v_count from public.wod_night_submissions s where s.game_id=p_game_id and s.night_number=v_night and s.clan_id=any(v_required);
+
+  select count(*) into v_count
+  from public.wod_night_submissions s
+  where s.game_id=p_game_id and s.night_number=v_night and s.clan_id=any(v_required);
   if v_count>=cardinality(v_required) then
-    update public.wod_nights set status='ready' where game_id=p_game_id and night_number=v_night;
+    update public.wod_nights
+    set status='ready'
+    where game_id=p_game_id and night_number=v_night;
     return 'ready';
   end if;
   return 'open';
 end;
 $$;
 
-create or replace function public.wod_try_begin_resolution(p_game_id text)
-returns jsonb language plpgsql security definer set search_path = '' as $$
-declare v_night integer; v_state jsonb; v_orders jsonb; v_rows integer;
+create or replace function public.wod_withdraw_orders(
+  p_game_id text,
+  p_player_id text,
+  p_clan_id text
+)
+returns void
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+declare
+  v_night integer;
+  v_status text;
+  v_assigned text;
+  v_rows integer;
 begin
-  select g.current_night into v_night from public.wod_games g where g.id=p_game_id for update;
+  select g.current_night into v_night
+  from public.wod_games g
+  where g.id=p_game_id
+  for update;
   if v_night is null then raise exception 'Unknown game'; end if;
-  update public.wod_nights set status='resolving' where game_id=p_game_id and night_number=v_night and status='ready';
+
+  select n.status into v_status
+  from public.wod_nights n
+  where n.game_id=p_game_id and n.night_number=v_night
+  for update;
+  if v_status<>'open' then
+    raise exception 'Orders can no longer be withdrawn for this night';
+  end if;
+
+  select gp.clan_id into v_assigned
+  from public.wod_game_players gp
+  where gp.game_id=p_game_id and gp.player_id=p_player_id;
+  if v_assigned is null or v_assigned<>p_clan_id then
+    raise exception 'Player is not assigned to this clan';
+  end if;
+
+  delete from public.wod_night_submissions s
+  where s.game_id=p_game_id
+    and s.night_number=v_night
+    and s.clan_id=p_clan_id
+    and s.player_id=p_player_id;
+  get diagnostics v_rows=row_count;
+  if v_rows<>1 then
+    raise exception 'No submitted orders found for this clan and night';
+  end if;
+end;
+$$;
+
+create or replace function public.wod_try_begin_resolution(p_game_id text)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_night integer;
+  v_state jsonb;
+  v_orders jsonb;
+  v_rows integer;
+begin
+  select g.current_night into v_night
+  from public.wod_games g
+  where g.id=p_game_id
+  for update;
+  if v_night is null then raise exception 'Unknown game'; end if;
+
+  update public.wod_nights
+  set status='resolving'
+  where game_id=p_game_id and night_number=v_night and status='ready';
   get diagnostics v_rows=row_count;
   if v_rows=0 then return null; end if;
-  select gs.state_json into v_state from public.wod_game_states gs where gs.game_id=p_game_id;
-  select coalesce(jsonb_object_agg(s.clan_id,s.orders_json),'{}'::jsonb) into v_orders from public.wod_night_submissions s where s.game_id=p_game_id and s.night_number=v_night;
-  return jsonb_build_object('game_id',p_game_id,'night',v_night,'state_json',v_state,'orders_by_clan',v_orders);
+
+  select gs.state_json into v_state
+  from public.wod_game_states gs
+  where gs.game_id=p_game_id;
+  select coalesce(jsonb_object_agg(s.clan_id,s.orders_json),'{}'::jsonb)
+  into v_orders
+  from public.wod_night_submissions s
+  where s.game_id=p_game_id and s.night_number=v_night;
+
+  return jsonb_build_object(
+    'game_id',p_game_id,
+    'night',v_night,
+    'state_json',v_state,
+    'orders_by_clan',v_orders
+  );
 end;
 $$;
 
 create or replace function public.wod_abort_resolution(p_game_id text,p_night integer)
-returns void language plpgsql security definer set search_path = '' as $$
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
 begin
-  update public.wod_nights set status='ready' where game_id=p_game_id and night_number=p_night and status='resolving';
+  update public.wod_nights
+  set status='ready'
+  where game_id=p_game_id and night_number=p_night and status='resolving';
 end;
 $$;
 
-create or replace function public.wod_finalize_resolution(p_game_id text,p_night integer,p_next_night integer,p_state_json jsonb,p_reports jsonb)
-returns void language plpgsql security definer set search_path = '' as $$
-declare v_status text; r record;
+create or replace function public.wod_finalize_resolution(
+  p_game_id text,
+  p_night integer,
+  p_next_night integer,
+  p_state_json jsonb,
+  p_reports jsonb
+)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_status text;
+  r record;
 begin
-  select n.status into v_status from public.wod_nights n where n.game_id=p_game_id and n.night_number=p_night for update;
+  select n.status into v_status
+  from public.wod_nights n
+  where n.game_id=p_game_id and n.night_number=p_night
+  for update;
   if v_status<>'resolving' then raise exception 'Night is not locked for resolution'; end if;
-  update public.wod_nights set status='resolved',resolved_at=now() where game_id=p_game_id and night_number=p_night;
+
+  update public.wod_nights
+  set status='resolved',resolved_at=now()
+  where game_id=p_game_id and night_number=p_night;
+
   for r in select key as clan_id,value as report_json from jsonb_each(p_reports) loop
     insert into public.wod_night_reports(game_id,night_number,clan_id,report_json)
     values(p_game_id,p_night,r.clan_id,r.report_json)
-    on conflict(game_id,night_number,clan_id) do update set report_json=excluded.report_json;
+    on conflict(game_id,night_number,clan_id)
+    do update set report_json=excluded.report_json;
   end loop;
-  insert into public.wod_game_states(game_id,state_json,updated_at) values(p_game_id,p_state_json,now())
-  on conflict(game_id) do update set state_json=excluded.state_json,updated_at=excluded.updated_at;
-  update public.wod_games set current_night=p_next_night,updated_at=now() where id=p_game_id;
-  insert into public.wod_nights(game_id,night_number,status) values(p_game_id,p_next_night,'open') on conflict(game_id,night_number) do nothing;
+
+  insert into public.wod_game_states(game_id,state_json,updated_at)
+  values(p_game_id,p_state_json,now())
+  on conflict(game_id)
+  do update set state_json=excluded.state_json,updated_at=excluded.updated_at;
+
+  update public.wod_games
+  set current_night=p_next_night,updated_at=now()
+  where id=p_game_id;
+
+  insert into public.wod_nights(game_id,night_number,status)
+  values(p_game_id,p_next_night,'open')
+  on conflict(game_id,night_number) do nothing;
 end;
 $$;
 
 revoke all on function public.wod_ensure_game(text,text,integer,text[],jsonb) from public,anon,authenticated;
 revoke all on function public.wod_submit_orders(text,text,text,jsonb) from public,anon,authenticated;
+revoke all on function public.wod_withdraw_orders(text,text,text) from public,anon,authenticated;
 revoke all on function public.wod_try_begin_resolution(text) from public,anon,authenticated;
 revoke all on function public.wod_abort_resolution(text,integer) from public,anon,authenticated;
 revoke all on function public.wod_finalize_resolution(text,integer,integer,jsonb,jsonb) from public,anon,authenticated;
+
 grant execute on function public.wod_ensure_game(text,text,integer,text[],jsonb) to service_role;
 grant execute on function public.wod_submit_orders(text,text,text,jsonb) to service_role;
+grant execute on function public.wod_withdraw_orders(text,text,text) to service_role;
 grant execute on function public.wod_try_begin_resolution(text) to service_role;
 grant execute on function public.wod_abort_resolution(text,integer) to service_role;
 grant execute on function public.wod_finalize_resolution(text,integer,integer,jsonb,jsonb) to service_role;
