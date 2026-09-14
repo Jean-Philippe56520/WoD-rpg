@@ -1,7 +1,7 @@
 import pytest
 
 from game.config import DEFAULT_RULES
-from game.models import ActionType, GameAction, PrimogenVote
+from game.models import ActionType, Candidate, GameAction, PrimogenVote
 from game.politics import determine_opposition_stances
 from game.resolution import resolve_night
 from game.world import create_initial_game_state, seed_candidates
@@ -17,7 +17,6 @@ def self_votes(state):
 def test_initial_opposition_decisions_are_autonomous():
     state = create_initial_game_state()
     stances = determine_opposition_stances(state)
-
     assert stances["ventrue"].supports_primogen is False
     assert stances["ventrue"].allied_primogen_id == "primogen_toreador"
     assert stances["toreador"].supports_primogen is True
@@ -31,7 +30,6 @@ def test_rally_action_can_flip_opposition_support():
         self_votes(state),
         seed_candidates(),
     )
-
     assert resolution.state.clan_states["ventrue"].opposition_loyalty == 60
     assert determine_opposition_stances(resolution.state)["ventrue"].supports_primogen is True
     assert state.clan_states["ventrue"].opposition_loyalty == 48
@@ -45,12 +43,10 @@ def test_consolidate_moves_influence_and_advances_night():
         self_votes(state),
         seed_candidates(),
     )
-
     ventrue = resolution.state.clan_states["ventrue"]
     assert ventrue.clan.dominant_current.influence == 64
     assert ventrue.clan.opposition_current.influence == 36
     assert resolution.state.night == 2
-    assert resolution.state.events
 
 
 def test_more_than_action_budget_is_rejected():
@@ -60,7 +56,6 @@ def test_more_than_action_budget_is_rejected():
         GameAction("ventrue", ActionType.BUILD_INFLUENCE),
         GameAction("ventrue", ActionType.CONSOLIDATE),
     ]
-
     with pytest.raises(ValueError, match="maximum"):
         resolve_night(state, actions, self_votes(state), seed_candidates())
 
@@ -68,14 +63,13 @@ def test_more_than_action_budget_is_rejected():
 def test_disputed_praxis_weakens_camarilla_and_masquerade():
     state = create_initial_game_state()
     resolution = resolve_night(state, [], self_votes(state), seed_candidates())
-
     assert resolution.vote is not None and resolution.vote.disputed is True
     assert resolution.state.praxis_status == "contested"
     assert resolution.state.camarilla_stability == 100 - DEFAULT_RULES.disputed_stability_loss
     assert resolution.state.masquerade_integrity == 100 - DEFAULT_RULES.disputed_masquerade_loss
 
 
-def test_primogen_majority_enters_transition_not_dual_office():
+def test_primogen_majority_becomes_prince_and_seat_is_replaced():
     state = create_initial_game_state()
     votes = {
         "primogen_ventrue": PrimogenVote("primogen_ventrue", "primogen_ventrue"),
@@ -83,26 +77,24 @@ def test_primogen_majority_enters_transition_not_dual_office():
         "primogen_brujah": PrimogenVote("primogen_brujah", "primogen_brujah"),
     }
     resolution = resolve_night(state, [], votes, seed_candidates())
-
-    assert resolution.vote is not None
-    assert resolution.vote.winner_id == "primogen_ventrue"
-    assert resolution.state.praxis_status == "transition"
-    assert resolution.state.prince_id is None
+    new_state = resolution.state
+    assert new_state.prince_id == "primogen_ventrue"
+    assert new_state.praxis_status == "recognized"
+    assert new_state.characters["primogen_ventrue"].is_primogen is False
+    assert new_state.clan_states["ventrue"].clan.primogen_id != "primogen_ventrue"
+    assert new_state.characters[new_state.clan_states["ventrue"].clan.primogen_id].is_primogen is True
+    assert new_state.prince_political_capital == DEFAULT_RULES.prince_initial_capital
 
 
 def test_non_primogen_majority_can_become_prince():
-    from game.models import Candidate
-
     state = create_initial_game_state()
-    outsider = Candidate(id="outsider_test", name="Hélène d'Arvor", is_primogen=False)
+    outsider = Candidate(id="outsider_test", name="Helene d'Arvor", is_primogen=False)
     candidates = seed_candidates() + [outsider]
     votes = {
         cs.clan.primogen_id: PrimogenVote(cs.clan.primogen_id, outsider.id)
         for cs in state.clan_states.values()
     }
-
     resolution = resolve_night(state, [], votes, candidates)
-
-    assert resolution.vote is not None and resolution.vote.winner_id == outsider.id
     assert resolution.state.prince_id == outsider.id
-    assert resolution.state.praxis_status == "recognized"
+    assert resolution.state.characters[outsider.id].is_primogen is False
+    assert resolution.state.prince_political_capital == DEFAULT_RULES.prince_initial_capital

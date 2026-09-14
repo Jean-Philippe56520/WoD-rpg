@@ -5,11 +5,16 @@ from enum import Enum
 from typing import Optional
 
 
-@dataclass(frozen=True)
+@dataclass
 class Character:
     id: str
     name: str
     clan_id: Optional[str] = None
+    current_id: Optional[str] = None
+    personal_influence: float = 0.0
+    humanity: int = 7
+    loyalty: float = 50.0
+    ambition: float = 50.0
     is_primogen: bool = False
 
 
@@ -77,14 +82,42 @@ class GameEvent:
     message: str
 
 
+class PrimogenPosition(str, Enum):
+    SUPPORT = "support"
+    NEUTRAL = "neutral"
+    OPPOSE = "oppose"
+
+
+class EmbraceStatus(str, Enum):
+    PENDING = "pending"
+    APPROVED = "approved"
+    REFUSED = "refused"
+
+
+@dataclass
+class EmbraceRequest:
+    id: str
+    requester_id: str
+    proposed_childe_name: str
+    primogen_position: PrimogenPosition
+    political_cost: float
+    created_night: int
+    status: EmbraceStatus = EmbraceStatus.PENDING
+    decision_night: Optional[int] = None
+
+
 @dataclass
 class GameState:
     night: int = 1
     camarilla_stability: float = 100.0
     masquerade_integrity: float = 100.0
     prince_id: Optional[str] = None
+    prince_political_capital: float = 0.0
+    prince_relations: dict[str, float] = field(default_factory=dict)
     praxis_status: str = "vacant"
+    characters: dict[str, Character] = field(default_factory=dict)
     clan_states: dict[str, ClanPoliticalState] = field(default_factory=dict)
+    embrace_requests: dict[str, EmbraceRequest] = field(default_factory=dict)
     events: list[GameEvent] = field(default_factory=list)
 
 

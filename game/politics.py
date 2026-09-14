@@ -31,19 +31,17 @@ def determine_opposition_stances(
     state: GameState,
     rules: GameRules = DEFAULT_RULES,
 ) -> dict[str, OppositionStance]:
-    """Let each opposition decide whether it follows its Primogen.
-
-    V0.2 deliberately keeps the decision model readable: the leader follows the
-    Primogen when the opposition's loyalty reaches the configurable threshold.
-    The allied Primogen is persistent state and is used only when dissent occurs.
-    """
     stances: dict[str, OppositionStance] = {}
+    current_primogens = {cs.clan.primogen_id for cs in state.clan_states.values()}
     for clan_id, clan_state in state.clan_states.items():
         supports = clan_state.opposition_loyalty >= rules.opposition_support_threshold
+        ally_id = None if supports else clan_state.opposition_ally_id
+        if ally_id is not None and ally_id not in current_primogens:
+            raise ValueError(f"Opposition ally is not a current Primogen: {ally_id}")
         stances[clan_id] = OppositionStance(
             clan_id=clan_id,
             supports_primogen=supports,
-            allied_primogen_id=None if supports else clan_state.opposition_ally_id,
+            allied_primogen_id=ally_id,
         )
     return stances
 
@@ -56,15 +54,6 @@ def resolve_praxis_vote(
     opposition_transfer_ratio: float = 0.5,
     recognition_threshold: float = 0.5,
 ) -> VoteResolution:
-    """Resolve the Primogens' weighted vote for recognition of a Praxis.
-
-    If an opposition dissents, a configured share of its influence leaves its
-    Primogen's voting weight and reinforces a pre-selected allied Primogen. The
-    transferred influence follows that allied Primogen's candidate choice.
-
-    A plurality is not enough: a candidate is recognised only when their score
-    is strictly greater than the configured share of all influence actually cast.
-    """
     if not 0 <= opposition_transfer_ratio <= 1:
         raise ValueError("opposition_transfer_ratio must be between 0 and 1")
     if not 0 <= recognition_threshold < 1:
@@ -73,16 +62,11 @@ def resolve_praxis_vote(
     clan_map = _validate_unique_clans(clans)
     candidate_map = {candidate.id: candidate for candidate in candidates}
     primogen_to_clan = {clan.primogen_id: clan for clan in clan_map.values()}
-    primogen_weights = {
-        clan.primogen_id: clan.total_influence for clan in clan_map.values()
-    }
+    primogen_weights = {clan.primogen_id: clan.total_influence for clan in clan_map.values()}
     transfers: list[dict[str, float | str]] = []
 
     for clan_id, clan in clan_map.items():
-        stance = stances.get(
-            clan_id,
-            OppositionStance(clan_id=clan_id, supports_primogen=True),
-        )
+        stance = stances.get(clan_id, OppositionStance(clan_id=clan_id, supports_primogen=True))
         if stance.supports_primogen:
             continue
 
