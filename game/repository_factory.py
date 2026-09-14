@@ -7,6 +7,10 @@ from .editable_repository import EditableSQLiteGameRepository, EditableSupabaseG
 from .persistence import GameRepository
 
 
+# Noms conservés comme points d'extension/test historiques de la factory.
+SQLiteGameRepository = EditableSQLiteGameRepository
+SupabaseGameRepository = EditableSupabaseGameRepository
+
 SUPABASE_URL_SECRET = "SUPABASE_URL"
 SUPABASE_KEY_SECRET = "SUPABASE_SECRET_KEY"
 
@@ -40,6 +44,6 @@ def create_repository(
         )
 
     if supabase_url and supabase_key:
-        return EditableSupabaseGameRepository(supabase_url, supabase_key), "Supabase"
+        return SupabaseGameRepository(supabase_url, supabase_key), "Supabase"
 
-    return EditableSQLiteGameRepository(sqlite_path), "SQLite local"
+    return SQLiteGameRepository(sqlite_path), "SQLite local"
