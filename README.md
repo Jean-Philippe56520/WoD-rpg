@@ -1,64 +1,70 @@
-# WoD RPG - prototype politique
+# WoD RPG - prototype politique multijoueur
 
-Prototype personnel d'un jeu politique vampirique asynchrone et persistant en Python + Streamlit.
+Jeu politique vampirique persistant et principalement asynchrone, développé en Python + Streamlit.
 
 Application stable : https://wod-rpg.streamlit.app
 
-## V0.4
+## V0.5
 
-Le prototype reste volontairement limite a trois clans : **Brujah, Toreador et Ventrue**.
+Le MVP reste limité à **Brujah, Toreador et Ventrue**.
 
-La V0.4 remplace le modele fixe "courant principal + opposition" par des **courants ideologiques dynamiques**.
+### Partie multijoueur asynchrone
 
-Chaque vampire possede desormais :
+- un joueur contrôle un seul clan ;
+- le joueur incarne le Primogène actuel de ce clan ;
+- sa session charge son clan en détail, mais seulement les informations publiques des autres clans ;
+- chaque joueur prépare ses choix puis clique sur **Valider ma nuit** ;
+- les ordres soumis deviennent persistants et ne sont plus modifiables pour cette nuit ;
+- aucune action n'est résolue immédiatement ;
+- la nuit globale est résolue automatiquement lorsque les trois clans ont soumis leurs ordres ;
+- le verrou `RESOLVING` empêche qu'une même nuit soit résolue deux fois ;
+- chaque clan reçoit ensuite son propre rapport selon les événements qu'il pouvait connaître ;
+- la nuit suivante s'ouvre automatiquement.
 
-- Humanite V5 (0 a 10) ;
-- Humanisme politique (-100 a +100) ;
-- Tradition politique (-100 a +100) ;
-- influence personnelle ;
-- loyaute et ambition.
+L'Elysium est indépendant de ce cycle : un joueur qui a déjà validé ses ordres peut toujours discuter avec les autres joueurs.
 
-Les axes Humanisme / Tradition produisent jusqu'a quatre courants par clan :
+### Politique
 
-- Humanistes traditionnels ;
-- Reformateurs humanistes ;
-- Traditionalistes predateurs ;
-- Radicaux predateurs.
+Le moteur conserve les systèmes précédents :
 
-Principes implementes :
+- Praxis et vote pondéré des Primogènes ;
+- Prince et Primogène incompatibles ;
+- succession automatique d'un Primogène devenu Prince ;
+- axes politiques Humanisme / Tradition ;
+- jusqu'à quatre courants idéologiques dynamiques par clan ;
+- influence des courants dérivée de leurs membres ;
+- dissidence 50/50 courant par courant ;
+- affinité idéologique ;
+- capital politique du Prince ;
+- autorisations d'Étreinte.
 
-- le courant d'un vampire est derive automatiquement de ses axes ;
-- un vampire peut changer de courant si son evolution traverse un axe ;
-- l'influence d'un courant est la somme de l'influence de ses membres ;
-- chaque courant possede un chef derive de ses membres ;
-- les proximites ideologiques produisent bonus ou malus dans le soutien et la diplomatie ;
-- le courant du Primogene soutient toujours son representant ;
-- chaque autre courant decide separement de le soutenir ou de faire dissidence ;
-- chaque courant dissident peut avoir son propre Primogene allie exterieur ;
-- en dissidence, 50 % de son influence reste avec le Primogene du clan et 50 % renforce son allie ;
-- Prince, successions, capital politique et Etreintes continuent de fonctionner sur ce nouveau modele.
+Une demande au Prince est désormais portée officiellement par le **Primogène**, au nom d'un membre précis de son clan.
+
+## Persistance
+
+La couche métier ne dépend pas de Streamlit.
+
+`game/persistence.py` définit une interface de dépôt et fournit actuellement `SQLiteGameRepository` pour le développement et les tests multijoueurs.
+
+SQLite n'est **jamais commité dans Git**. Le fichier est ignoré par `.gitignore`.
+
+Sur Streamlit Cloud, SQLite permet de partager l'état entre sessions tant que l'instance conserve son disque, mais ce stockage n'est pas garanti après un redéploiement ou un redémarrage. La persistance durable cible PostgreSQL / Supabase. Le schéma préparatoire se trouve dans `supabase/schema.sql`.
 
 ## Architecture
 
-- `game/ideology.py` : axes, quadrants, courants derives et affinites ;
-- `game/politics.py` : soutien courant par courant et vote de Praxis ;
-- `game/offices.py` : Prince, Primogenes et successions ;
-- `game/embrace.py` : demandes d'Etreinte et consequences ;
-- `game/actions.py` : actions politiques et diplomatie ;
-- `game/resolution.py` : resolution des nuits ;
-- `game/config.py` : valeurs configurables ;
-- `game/world.py` : etat initial ;
+- `game/models.py` : modèles de domaine ;
+- `game/ideology.py` : axes et courants dynamiques ;
+- `game/politics.py` : dissidences et vote de Praxis ;
+- `game/actions.py` : actions politiques ;
+- `game/offices.py` : Prince, Primogènes et successions ;
+- `game/embrace.py` : demandes d'Étreinte et décisions du Prince ;
+- `game/resolution.py` : résolution globale d'une nuit ;
+- `game/serialization.py` : sérialisation JSON stable ;
+- `game/persistence.py` : stockage des parties, ordres, rapports et Elysium ;
+- `game/multiplayer.py` : orchestration asynchrone joueur/clan/nuit ;
+- `game/world.py` : monde initial ;
 - `app.py` : interface Streamlit ;
-- `tests/` : tests automatises.
-
-GitHub contient le code et les contenus statiques, jamais les sauvegardes dynamiques des parties.
-
-## Lancer localement
-
-```bash
-pip install -r requirements.txt
-streamlit run app.py
-```
+- `tests/` : tests automatisés.
 
 ## Tests
 
@@ -68,9 +74,10 @@ pytest -q
 
 ## Suite cible
 
-1. relations personnelles et faveurs ;
-2. evolution ideologique par evenements et consequences ;
-3. persistance distante des parties et comptes joueurs ;
-4. Etreintes clandestines et consequences ;
-5. territoires, institutions, Mascarade et factions PNJ ;
-6. Elysium et diplomatie persistante.
+1. brancher la persistance distante PostgreSQL/Supabase ;
+2. authentification réelle des joueurs ;
+3. déclarations de candidatures à la Praxis ;
+4. demandes internes autonomes des membres au Primogène ;
+5. événements et informations avec brouillard de guerre plus fin ;
+6. relations, faveurs et dettes ;
+7. territoires, institutions et Mascarade avancée.

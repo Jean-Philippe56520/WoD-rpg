@@ -1,9 +1,14 @@
 import pytest
 
 from game.config import DEFAULT_RULES
-from game.embrace import calculate_embrace_cost, create_embrace_request, decide_embrace_request
+from game.embrace import (
+    calculate_embrace_cost,
+    create_embrace_request,
+    decide_embrace_request,
+    process_primogen_petition,
+)
 from game.ideology import build_currents, character_current_id
-from game.models import Candidate, EmbraceStatus, PrimogenPosition
+from game.models import Candidate, EmbracePetitionOrder, EmbraceStatus, PrimogenPosition
 from game.offices import install_prince
 from game.world import create_initial_game_state
 
@@ -71,3 +76,29 @@ def test_approval_fails_when_prince_lacks_capital():
     state.prince_political_capital = 0
     with pytest.raises(ValueError, match="Insufficient"):
         decide_embrace_request(state, "embrace_1", True)
+
+
+def test_primogen_must_submit_request_for_another_member():
+    state = state_with_ventrue_prince()
+    current_primogen = state.clan_states["ventrue"].clan.primogen_id
+    with pytest.raises(ValueError, match="another clan member"):
+        create_embrace_request(
+            state,
+            current_primogen,
+            "Alix",
+            PrimogenPosition.SUPPORT,
+            submitted_by_primogen_id=current_primogen,
+        )
+
+
+def test_primogen_petition_records_official_submitter():
+    state = state_with_ventrue_prince()
+    current_primogen = state.clan_states["toreador"].clan.primogen_id
+    state = process_primogen_petition(
+        state,
+        "toreador",
+        EmbracePetitionOrder("toreador_camille", "Adele"),
+    )
+    request = list(state.embrace_requests.values())[-1]
+    assert request.submitted_by_primogen_id == current_primogen
+    assert request.requester_id == "toreador_camille"

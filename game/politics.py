@@ -4,12 +4,7 @@ from dataclasses import dataclass
 from typing import Iterable, Mapping
 
 from .config import DEFAULT_RULES, GameRules
-from .ideology import (
-    build_currents,
-    ideological_affinity_values,
-    initialize_current_politics,
-    primogen_current_id,
-)
+from .ideology import build_currents, ideological_affinity_values, initialize_current_politics, primogen_current_id
 from .models import Candidate, CurrentStance, GameState, PrimogenVote
 
 
@@ -42,23 +37,17 @@ def determine_current_stances(
                     current_id=current_id,
                     supports_primogen=True,
                     support_score=100.0,
-                    allied_primogen_id=None,
                 )
                 continue
 
-            loyalty = clan_state.current_loyalties.get(
-                current_id, rules.current_default_loyalty
-            )
+            loyalty = clan_state.current_loyalties.get(current_id, rules.current_default_loyalty)
             affinity = ideological_affinity_values(
                 current.centroid_humanism,
                 current.centroid_tradition,
                 primogen.humanism,
                 primogen.tradition,
             )
-            support_score = max(
-                0.0,
-                min(100.0, loyalty + affinity * rules.ideology_support_scale),
-            )
+            support_score = max(0.0, min(100.0, loyalty + affinity * rules.ideology_support_scale))
             supports = support_score >= rules.current_support_threshold
             ally_id = None if supports else clan_state.current_allies.get(current_id)
             if ally_id is not None:
