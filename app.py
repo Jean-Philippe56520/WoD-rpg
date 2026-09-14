@@ -16,6 +16,7 @@ from game.models import (
 )
 from game.multiplayer import DEFAULT_GAME_ID, MultiplayerGameService
 from game.repository_factory import create_repository
+from game.supabase_repository import SupabaseRestError
 from game.world import candidates_from_state
 
 
@@ -31,29 +32,46 @@ def get_repository():
 
 try:
     repo, persistence_backend = get_repository()
-except RuntimeError as exc:
+except (RuntimeError, ValueError) as exc:
     st.error(str(exc))
     st.stop()
 
 service = MultiplayerGameService(repo)
-service.ensure_default_game()
+try:
+    service.ensure_default_game()
+except SupabaseRestError as exc:
+    st.error(
+        f"Connexion Supabase refusee (HTTP {exc.status_code}). "
+        "Verifiez que SUPABASE_URL cible bien le projet WoD-rpg et que "
+        "SUPABASE_SECRET_KEY est une cle serveur sb_secret_ (ou l'ancienne cle service_role), "
+        "jamais une cle publishable/anon."
+    )
+    st.stop()
+except RuntimeError as exc:
+    st.error(f"Supabase est temporairement inaccessible : {exc}")
+    st.stop()
 
 player_id = st.query_params.get("player")
 if not player_id:
     player_id = uuid.uuid4().hex
     st.query_params["player"] = player_id
 
-state = repo.get_game_state(DEFAULT_GAME_ID)
-game_info = repo.get_game_info(DEFAULT_GAME_ID)
-assignments = repo.list_assignments(DEFAULT_GAME_ID)
-player_clan = repo.get_player_clan(DEFAULT_GAME_ID, player_id)
+try:
+    state = repo.get_game_state(DEFAULT_GAME_ID)
+    game_info = repo.get_game_info(DEFAULT_GAME_ID)
+    assignments = repo.list_assignments(DEFAULT_GAME_ID)
+    player_clan = repo.get_player_clan(DEFAULT_GAME_ID, player_id)
+except SupabaseRestError as exc:
+    st.error(f"Lecture Supabase impossible (HTTP {exc.status_code}).")
+    st.stop()
+
 clan_names = {clan_id: clan_state.clan.name for clan_id, clan_state in state.clan_states.items()}
 
 with st.sidebar:
     st.header("Ville")
+    st.caption(f"Persistance : {persistence_backend}")
     st.metric("Nuit", game_info["current_night"])
     st.write(f"**Statut :** {game_info['night_status'].value.upper()}")
-    st.write(f"**Persistance :** {persistence_backend}")
     st.metric("Stabilite Camarilla", f"{state.camarilla_stability:.0f}%")
     st.metric("Integrite Mascarade", f"{state.masquerade_integrity:.0f}%")
     st.write(f"**Praxis :** {state.praxis_status}")
@@ -291,6 +309,6 @@ with reports_tab:
                 st.write(f"- {item}")
 
 st.caption(
-    f"V0.5 : persistance active = {persistence_backend}. "
-    "Les ordres sont resolus globalement lorsque les trois clans ont valide leur nuit."
+    "V0.5 : les ordres sont persistants dans Supabase en production et resolus globalement "
+    "lorsque les trois clans ont valide. SQLite reste disponible pour le developpement local."
 )
