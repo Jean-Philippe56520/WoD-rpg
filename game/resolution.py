@@ -7,6 +7,7 @@ from typing import Iterable, Mapping
 from .actions import apply_action
 from .config import DEFAULT_RULES, GameRules
 from .models import Candidate, GameAction, GameEvent, GameState, PrimogenVote
+from .offices import install_prince
 from .politics import VoteResolution, determine_opposition_stances, resolve_praxis_vote
 
 
@@ -42,15 +43,13 @@ def resolve_night(
     candidates: Iterable[Candidate],
     rules: GameRules = DEFAULT_RULES,
 ) -> NightResolution:
-    """Resolve one asynchronous political night and return a new state."""
     next_state = deepcopy(state)
     actions = _validate_action_budget(next_state, actions, rules)
     candidates = list(candidates)
     candidate_map = {candidate.id: candidate for candidate in candidates}
 
     for action in actions:
-        event = apply_action(next_state, action, rules)
-        next_state.events.append(event)
+        next_state.events.append(apply_action(next_state, action, rules))
 
     vote_result: VoteResolution | None = None
     if next_state.prince_id is None:
@@ -59,13 +58,13 @@ def resolve_night(
             clan_state = next_state.clan_states[clan_id]
             if stance.supports_primogen:
                 message = (
-                    f"L'opposition {clan_state.clan.name} soutient son Primogène "
-                    f"(loyauté {clan_state.opposition_loyalty:.0f})."
+                    f"L'opposition {clan_state.clan.name} soutient son Primogene "
+                    f"(loyaute {clan_state.opposition_loyalty:.0f})."
                 )
             else:
                 message = (
-                    f"L'opposition {clan_state.clan.name} refuse de suivre son Primogène et "
-                    "active son alliance politique préexistante."
+                    f"L'opposition {clan_state.clan.name} refuse de suivre son Primogene et "
+                    "active son alliance politique preexistante."
                 )
             next_state.events.append(
                 GameEvent(night=next_state.night, category="opposition", message=message)
@@ -93,41 +92,17 @@ def resolve_night(
                     night=next_state.night,
                     category="praxis",
                     message=(
-                        "La Praxis reste contestée : aucun candidat ne rassemble une majorité "
+                        "La Praxis reste contestee : aucun candidat ne rassemble une majorite "
                         "politique suffisante. La Camarilla locale s'affaiblit."
                     ),
                 )
             )
         else:
             winner = candidate_map[vote_result.winner_id]
-            if winner.is_primogen:
-                next_state.praxis_status = "transition"
-                next_state.camarilla_stability = min(
-                    100.0, next_state.camarilla_stability + rules.transition_stability_gain
-                )
-                next_state.events.append(
-                    GameEvent(
-                        night=next_state.night,
-                        category="praxis",
-                        message=(
-                            f"{winner.name} obtient la majorité nécessaire pour revendiquer la Praxis, "
-                            "mais doit quitter la Primogéniture avant de pouvoir devenir Prince."
-                        ),
-                    )
-                )
-            else:
-                next_state.prince_id = winner.id
-                next_state.praxis_status = "recognized"
-                next_state.camarilla_stability = min(
-                    100.0, next_state.camarilla_stability + rules.recognized_stability_gain
-                )
-                next_state.events.append(
-                    GameEvent(
-                        night=next_state.night,
-                        category="praxis",
-                        message=f"{winner.name} est reconnu comme Prince de la ville.",
-                    )
-                )
+            install_prince(next_state, winner, rules)
+            next_state.camarilla_stability = min(
+                100.0, next_state.camarilla_stability + rules.recognized_stability_gain
+            )
 
     next_state.night += 1
     return NightResolution(state=next_state, vote=vote_result)

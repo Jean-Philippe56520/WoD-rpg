@@ -1,43 +1,43 @@
-# WoD RPG — prototype politique
+# WoD RPG - prototype politique
 
-Prototype personnel d'un jeu politique vampirique asynchrone et persistant, développé en Python + Streamlit.
+Prototype personnel d'un jeu politique vampirique asynchrone et persistant en Python + Streamlit.
 
 Application stable : https://wod-rpg.streamlit.app
 
-## V0.2
+## V0.3
 
-Le prototype reste volontairement limité à **Brujah, Toreador et Ventrue**.
+Le prototype reste volontairement limite a trois clans : **Brujah, Toreador et Ventrue**.
 
-Chaque joueur dirige un clan mais incarne directement son **Primogène**. Les oppositions internes sont semi-autonomes : leur soutien dépend de leur loyauté politique et leur allié extérieur est conservé d'une nuit à l'autre.
+Principes implementes :
 
-### Boucle actuelle
+- le joueur represente un clan et incarne son Primogene ;
+- chaque clan possede un courant principal et une opposition semi-autonome ;
+- une opposition dissidente conserve 50 % de son influence avec son Primogene et transfere 50 % au vote d'un Primogene allie prealablement choisi ;
+- une majorite politique stricte est necessaire pour faire reconnaitre une Praxis ;
+- un candidat Prince n'est pas oblige d'etre Primogene ;
+- Prince et Primogene ne peuvent jamais etre la meme fonction ;
+- si un Primogene devient Prince, une succession interne designe automatiquement un nouveau Primogene ;
+- les membres importants du clan possedent influence, Humanite, loyaute et ambition ;
+- le Prince dispose d'un capital politique ;
+- les vampires peuvent demander l'autorisation d'Etreindre ;
+- le cout varie selon le clan du Prince, le courant du demandeur et la position du Primogene ;
+- autorisations et refus ont des consequences politiques ;
+- le monde avance par cycles de nuit et conserve un journal d'evenements pendant la session Streamlit.
 
-- 2 actions politiques par clan et par nuit ;
-- consolidation du courant du Primogène ;
-- ralliement de l'opposition ;
-- développement de l'influence ;
-- diplomatie entre clans ;
-- résolution autonome du soutien des oppositions ;
-- règle de dissidence 50/50 ;
-- vote des Primogènes pour la Praxis ;
-- majorité stricte nécessaire pour reconnaître une Praxis ;
-- perte de stabilité et de Mascarade en cas de Praxis contestée ;
-- journal des événements ;
-- état conservé pendant la session Streamlit.
+## Architecture
 
-Prince et Primogène restent deux fonctions incompatibles. Si un Primogène obtient une majorité de reconnaissance pour la Praxis, le moteur place la ville en **transition** : la succession de son siège devra être résolue avant son accession au titre de Prince.
+- `game/models.py` : modeles de domaine.
+- `game/politics.py` : vote de Praxis et dissidence.
+- `game/offices.py` : Prince, Primogenes et successions.
+- `game/embrace.py` : demandes d'Etreinte, couts et decisions.
+- `game/actions.py` : actions politiques de nuit.
+- `game/resolution.py` : resolution des nuits.
+- `game/config.py` : valeurs configurables.
+- `game/world.py` : etat initial du prototype.
+- `app.py` : interface Streamlit.
+- `tests/` : tests du moteur.
 
-## Règle de dissidence
-
-Si l'opposition soutient son Primogène, toute l'influence du clan soutient son vote.
-
-Si elle refuse :
-
-- 50 % de l'influence du courant d'opposition reste avec le Primogène ;
-- 50 % renforce le poids du vote d'un Primogène allié choisi préalablement par le chef d'opposition ;
-- cette influence suit le choix de vote du Primogène allié.
-
-Les valeurs sont centralisées dans `game/config.py`.
+GitHub contient le code et les contenus statiques, jamais les sauvegardes dynamiques des parties.
 
 ## Lancer localement
 
@@ -52,24 +52,11 @@ streamlit run app.py
 pytest -q
 ```
 
-## Architecture
+## Suite cible
 
-- `app.py` : interface Streamlit ;
-- `game/models.py` : modèles de domaine ;
-- `game/config.py` : paramètres configurables ;
-- `game/actions.py` : actions politiques ;
-- `game/politics.py` : oppositions et vote de Praxis ;
-- `game/resolution.py` : résolution d'une nuit ;
-- `game/world.py` : état initial ;
-- `tests/` : tests automatisés.
-
-Les règles restent indépendantes de Streamlit. GitHub contient le code, pas les sauvegardes vivantes.
-
-## Suite prévue
-
-1. succession d'un Primogène qui accède à la Praxis ;
-2. Prince, autorité et capital politique ;
-3. autorisations d'Étreinte ;
-4. faveurs et relations plus riches ;
-5. persistance multijoueur distante ;
-6. territoires, Mascarade avancée et factions PNJ.
+1. relations et faveurs plus riches ;
+2. persistance distante des parties et comptes joueurs ;
+3. autorisations clandestines et consequences ;
+4. territoires et institutions ;
+5. Mascarade, crises et factions PNJ ;
+6. Elysium et diplomatie persistante.
