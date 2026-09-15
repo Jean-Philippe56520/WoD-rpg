@@ -29,6 +29,11 @@ class CharacterAttribute(str, Enum):
     MENTAL = "mental"
 
 
+class CoterieSide(str, Enum):
+    PRIMOGEN = "primogen"
+    OPPOSITION = "opposition"
+
+
 CLAN_DISCIPLINES: dict[str, tuple[str, ...]] = {
     "brujah": ("celerite", "puissance", "presence"),
     "toreador": ("auspex", "celerite", "presence"),
@@ -56,6 +61,8 @@ class Character:
     disciplines: dict[str, int] = field(default_factory=dict)
     blood_rank: BloodRank = BloodRank.NEWBORN
     backgrounds: dict[str, int] = field(default_factory=dict)
+    relation_to_primogen: int = 1
+    relations: dict[str, int] = field(default_factory=dict)
     loyalty: float = 50.0
     ambition: float = 50.0
     is_primogen: bool = False
@@ -69,6 +76,7 @@ class Character:
             ("Physical", self.physical),
             ("Social", self.social),
             ("Mental", self.mental),
+            ("Relation to Primogen", self.relation_to_primogen),
         ):
             _validate_zero_to_two(label, value)
 
@@ -90,7 +98,6 @@ class Character:
             if not discipline.strip():
                 raise ValueError("Discipline names cannot be empty")
             _validate_zero_to_two(f"Discipline {discipline}", score)
-
         clan_disciplines = CLAN_DISCIPLINES.get(self.clan_id or "")
         if clan_disciplines is not None:
             invalid = set(self.disciplines) - set(clan_disciplines)
@@ -103,6 +110,10 @@ class Character:
             if not background.strip():
                 raise ValueError("Background names cannot be empty")
             _validate_zero_to_two(f"Background {background}", score)
+        for target_id, score in self.relations.items():
+            if not target_id.strip():
+                raise ValueError("Relation targets cannot be empty")
+            _validate_zero_to_two(f"Relation {target_id}", score)
 
 
 @dataclass(frozen=True)
@@ -135,6 +146,14 @@ class CurrentStance:
 
 
 @dataclass(frozen=True)
+class CoterieStance:
+    clan_id: str
+    supports_primogen: bool
+    support_score: float
+    allied_primogen_id: Optional[str] = None
+
+
+@dataclass(frozen=True)
 class PrimogenVote:
     primogen_id: str
     candidate_id: str
@@ -151,9 +170,14 @@ class Candidate:
 @dataclass
 class ClanPoliticalState:
     clan: Clan
+    coterie_memberships: dict[str, CoterieSide] = field(default_factory=dict)
+    opposition_leader_id: Optional[str] = None
+    opposition_allied_primogen_id: Optional[str] = None
+    known_character_intel: dict[str, int] = field(default_factory=dict)
+    relations: dict[str, float] = field(default_factory=dict)
+    # Legacy V0.7 fields kept only so old states can be deserialized safely.
     current_loyalties: dict[str, float] = field(default_factory=dict)
     current_allies: dict[str, str] = field(default_factory=dict)
-    relations: dict[str, float] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -208,16 +232,24 @@ class GameState:
 
 
 class ActionType(str, Enum):
-    CONSOLIDATE = "consolidate"
-    RALLY_OPPOSITION = "rally_opposition"
     BUILD_INFLUENCE = "build_influence"
     DIPLOMACY = "diplomacy"
+    CONSOLIDATE_RELATION = "consolidate_relation"
+    RECRUIT = "recruit"
+    UNDERMINE = "undermine"
+    POACH = "poach"
+    INVESTIGATE = "investigate"
+    # Legacy order values accepted for already-submitted V0.7 nights.
+    CONSOLIDATE = "consolidate"
+    RALLY_OPPOSITION = "rally_opposition"
 
 
 @dataclass(frozen=True)
 class GameAction:
     clan_id: str
     action_type: ActionType
+    actor_character_id: Optional[str] = None
+    target_character_id: Optional[str] = None
     target_clan_id: Optional[str] = None
     target_current_id: Optional[str] = None
 
@@ -241,6 +273,7 @@ class ClanNightOrders:
     actions: tuple[GameAction, ...]
     vote: PrimogenVote | None = None
     embrace_petitions: tuple[EmbracePetitionOrder, ...] = ()
+    version: int = 1
 
 
 @dataclass(frozen=True)
