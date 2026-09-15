@@ -2,8 +2,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 import tempfile
 from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from game.editable_repository import EditableSQLiteGameRepository
 from game.qa_scenarios import QA_SCENARIOS, ensure_qa_scenario, qa_snapshot
