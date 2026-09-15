@@ -1,18 +1,16 @@
 from __future__ import annotations
 
 from .config import DEFAULT_RULES, GameRules
-from .ideology import build_currents, character_current_id, initialize_current_politics
-from .models import AxisPolarity, BloodRank, Candidate, Character, GameEvent, GameState
-
-
-def _current_influence(state: GameState, character: Character) -> float:
-    if not character.clan_id:
-        return 0.0
-    current_id = character_current_id(character)
-    if current_id is None:
-        return 0.0
-    current = build_currents(state, character.clan_id).get(current_id)
-    return current.influence if current else 0.0
+from .coteries import coterie_influence, initialize_coteries
+from .models import (
+    AxisPolarity,
+    BloodRank,
+    Candidate,
+    Character,
+    CoterieSide,
+    GameEvent,
+    GameState,
+)
 
 
 def succession_score(
@@ -22,11 +20,13 @@ def succession_score(
 ) -> float:
     if character.clan_id is None:
         return float("-inf")
+    clan_state = state.clan_states[character.clan_id]
+    side = clan_state.coterie_memberships.get(character.id, CoterieSide.PRIMOGEN)
     return (
         character.personal_influence
-        + _current_influence(state, character) * rules.succession_current_weight
+        + coterie_influence(state, character.clan_id, side) * rules.succession_current_weight
         + character.ambition * rules.succession_ambition_weight
-        + character.loyalty * rules.succession_loyalty_weight
+        + character.relation_to_primogen * 5.0
     )
 
 
@@ -36,6 +36,7 @@ def choose_successor(
     outgoing_primogen_id: str,
     rules: GameRules = DEFAULT_RULES,
 ) -> Character:
+    initialize_coteries(state)
     eligible = [
         character
         for character in state.characters.values()
@@ -53,30 +54,27 @@ def _apply_succession(state: GameState, outgoing: Character, rules: GameRules) -
         raise ValueError("A Primogen must belong to a clan")
     clan_state = state.clan_states[outgoing.clan_id]
     clan = clan_state.clan
-    outgoing_current_id = character_current_id(outgoing)
     outgoing.is_primogen = False
 
     successor = choose_successor(state, outgoing.clan_id, outgoing.id, rules)
     successor.is_primogen = True
+    successor.relation_to_primogen = 2
     clan.primogen_id = successor.id
-    successor_current_id = character_current_id(successor)
-
-    if outgoing_current_id and successor_current_id != outgoing_current_id:
-        clan_state.current_loyalties.setdefault(outgoing_current_id, rules.succession_loyalty_reset)
+    clan_state.coterie_memberships[successor.id] = CoterieSide.PRIMOGEN
+    if clan_state.opposition_leader_id == successor.id:
+        clan_state.opposition_leader_id = None
 
     for other_state in state.clan_states.values():
-        for current_id, ally_id in list(other_state.current_allies.items()):
-            if ally_id == outgoing.id:
-                other_state.current_allies[current_id] = successor.id
+        if other_state.opposition_allied_primogen_id == outgoing.id:
+            other_state.opposition_allied_primogen_id = successor.id
 
-    initialize_current_politics(state, rules)
     state.events.append(
         GameEvent(
             night=state.night,
             category="succession",
             message=(
-                f"{outgoing.name} quitte la Primogeniture {clan.name}. "
-                f"{successor.name} devient le nouveau Primogene du clan."
+                f"{outgoing.name} quitte la Primogéniture {clan.name}. "
+                f"{successor.name} devient le nouveau Primogène du clan."
             ),
         )
     )
@@ -107,6 +105,7 @@ def install_prince(
             disciplines={},
             blood_rank=BloodRank.ANCILLA,
             backgrounds={"Influence politique": 1},
+            relation_to_primogen=1,
             loyalty=50,
             ambition=75,
             is_primogen=False,
@@ -121,7 +120,7 @@ def install_prince(
     state.prince_political_capital = rules.prince_initial_capital
     state.prince_relations = {clan_id: 0.0 for clan_id in state.clan_states}
     state.praxis_status = "recognized"
-    initialize_current_politics(state, rules)
+    initialize_coteries(state)
     state.events.append(
         GameEvent(
             night=state.night,
