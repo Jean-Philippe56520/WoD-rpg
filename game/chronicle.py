@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from enum import Enum
 import hashlib
-from typing import Any
 
 
 CHRONICLE_GAME_ID = "chronicle_1435"
@@ -241,7 +240,6 @@ class NightOutcome:
     detail: str
     updated_character: PlayerCharacter
     tags: tuple[str, ...] = ()
-    steps: tuple[dict[str, Any], ...] = ()
 
 
 def sire_for_id(sire_id: str) -> SireProfile:
@@ -361,68 +359,113 @@ def resolve_personal_night(
     if character.local_night > nights_per_segment:
         raise ValueError("Character night is outside the current segment")
 
+    action = PersonalAction(action)
     roll = _stable_roll(character, action)
-    success = roll >= 5
+    strong = roll >= 8
+    success = roll >= 4
+
     hunger = character.hunger
     reputation = character.reputation
     influence = character.personal_influence
     sire_relation = character.sire_relation
     goal_progress = character.goal_progress
-    summary = ""
-    detail = ""
+    tags: list[str] = []
 
     if action == PersonalAction.HUNT:
-        if success:
+        if strong:
+            hunger = max(0, hunger - 2)
+            summary = "La chasse est nette et maîtrisée."
+            detail = "Vous trouvez une proie sans attirer d'attention inutile et apaisez fortement votre Faim."
+            tags.extend(("faim", "succès fort"))
+        elif success:
             hunger = max(0, hunger - 1)
-            summary = "La chasse apaise la Bête."
-            detail = "Vous revenez avant l'aube avec la Faim sous contrôle."
+            summary = "Vous parvenez à vous nourrir."
+            detail = "La chasse prend du temps, mais vous rentrez avant l'aube avec la Bête sous contrôle."
+            tags.extend(("faim", "succès"))
         else:
             hunger = min(5, hunger + 1)
-            summary = "La chasse tourne mal."
-            detail = "La proie vous échappe et la Faim devient plus pressante."
+            summary = "La chasse tourne court."
+            detail = "Une occasion vous échappe et la frustration aiguise la Bête."
+            tags.extend(("faim", "revers"))
     elif action == PersonalAction.VISIT_SIRE:
-        sire_relation = min(3, sire_relation + (1 if success else 0))
-        goal_progress += 1 if success else 0
-        summary = "Votre sire mesure vos progrès."
-        detail = (
-            "Votre attitude renforce sa confiance et ouvre la voie à davantage d'autonomie."
-            if success
-            else "Votre sire reste protecteur, mais doute encore de votre capacité à agir seul."
-        )
+        if success:
+            sire_relation = min(3, sire_relation + 1)
+            if strong:
+                influence += 0.5
+            summary = f"{character.sire_name} vous accorde du crédit."
+            detail = (
+                "Votre sire ne vous traite plus seulement comme une responsabilité : votre capacité à écouter "
+                "et à répondre utilement commence à peser."
+            )
+            tags.extend(("sire", "relation"))
+        else:
+            sire_relation = max(0, sire_relation - 1)
+            summary = f"L'entretien avec {character.sire_name} se tend."
+            detail = "Votre sire estime que vous n'avez pas compris la portée de ses attentes."
+            tags.extend(("sire", "tension"))
     elif action == PersonalAction.INVESTIGATE:
-        goal_progress += 2 if success else 0
-        summary = "Vous remontez une piste politique."
-        detail = (
-            "Vous identifiez un lien utile entre deux acteurs de la cité."
-            if success
-            else "Les rumeurs se contredisent et vous perdez du temps sans certitude."
-        )
+        if strong:
+            goal_progress += 2
+            summary = "Votre enquête ouvre une piste importante."
+            detail = "Plusieurs détails jusque-là isolés forment enfin un motif cohérent. Vous détenez un avantage d'information."
+            tags.extend(("information", "succès fort"))
+        elif success:
+            goal_progress += 1
+            summary = "Vous obtenez un indice exploitable."
+            detail = "La piste reste incomplète, mais elle suffit à orienter votre prochaine décision."
+            tags.extend(("information", "succès"))
+        else:
+            summary = "Votre enquête se heurte à des silences."
+            detail = "Quelqu'un a pris soin d'effacer ou de déplacer ce que vous cherchiez."
+            tags.extend(("information", "revers"))
     elif action == PersonalAction.BUILD_RELATION:
-        influence += 1.0 if success else 0.25
-        summary = "Vous cultivez une relation."
-        detail = (
-            "Votre interlocuteur commence à vous considérer comme une relation utile."
-            if success
-            else "Le contact existe, mais aucun engagement solide n'en ressort encore."
-        )
+        if strong:
+            reputation = min(3, reputation + 1)
+            influence += 0.5
+            summary = "Votre présence laisse une impression durable."
+            detail = "Un échange bien mené vous vaut une réputation légèrement meilleure et un premier levier social."
+            tags.extend(("relation", "réputation"))
+        elif success:
+            influence += 0.5
+            summary = "Vous consolidez un lien utile."
+            detail = "Rien n'est encore acquis, mais quelqu'un sera désormais plus enclin à vous écouter."
+            tags.append("relation")
+        else:
+            summary = "La relation reste distante."
+            detail = "Votre interlocuteur demeure prudent et ne vous accorde rien qui l'engage."
+            tags.append("relation")
     elif action == PersonalAction.ELYSIUM:
-        reputation = min(3, reputation + (1 if success else 0))
-        influence += 0.5 if success else 0.0
-        summary = "Vous paraissez dans les cercles nocturnes."
-        detail = (
-            "Votre nom circule favorablement après votre passage."
-            if success
-            else "Votre présence passe presque inaperçue, ce qui reste préférable à un faux pas."
-        )
-    elif action == PersonalAction.PURSUE_GOAL:
-        goal_progress += 2 if success else 1
-        summary = "Vous avancez votre objectif personnel."
-        detail = (
-            "Vous obtenez un résultat concret qui pourra compter lors du prochain bilan."
-            if success
-            else "Le résultat reste partiel, mais vous comprenez mieux ce qui vous bloque."
-        )
+        if strong:
+            influence += 1.0
+            summary = "Votre passage à l'Elysium est remarqué."
+            detail = "Vous choisissez les bons interlocuteurs et quittez les lieux avec davantage de présence politique qu'en arrivant."
+            tags.extend(("elysium", "influence"))
+        elif success:
+            influence += 0.5
+            summary = "Vous commencez à exister dans les conversations."
+            detail = "Quelques noms apprennent le vôtre. Pour un nouveau-né, c'est déjà une progression."
+            tags.extend(("elysium", "influence"))
+        else:
+            summary = "L'Elysium vous rappelle votre insignifiance actuelle."
+            detail = "Les conversations importantes se ferment avant que vous puissiez y prendre place."
+            tags.append("elysium")
+    else:
+        if strong:
+            goal_progress += 2
+            summary = "Vous faites avancer nettement votre objectif."
+            detail = "Votre initiative produit un résultat qui pourra peser dans le bilan du chapitre."
+            tags.extend(("objectif", "succès fort"))
+        elif success:
+            goal_progress += 1
+            summary = "Votre objectif progresse."
+            detail = "Vous n'avez pas encore obtenu ce que vous cherchez, mais votre position s'améliore."
+            tags.extend(("objectif", "succès"))
+        else:
+            summary = "Votre objectif résiste."
+            detail = "La nuit révèle surtout ce qui vous manque encore : accès, information ou soutien."
+            tags.extend(("objectif", "revers"))
 
+    detail += _free_intent_suffix(free_intent)
     ready = character.local_night >= nights_per_segment
     next_night = character.local_night if ready else character.local_night + 1
     updated = replace(
@@ -439,6 +482,20 @@ def resolve_personal_night(
         action=action,
         roll=roll,
         summary=summary,
-        detail=detail + _free_intent_suffix(free_intent),
+        detail=detail,
         updated_character=updated,
+        tags=tuple(tags),
     )
+
+
+def nightly_hook(character: PlayerCharacter) -> str:
+    options = (
+        f"{character.sire_name} a fait demander si vous étiez disponible avant l'aube.",
+        "Un messager affirme qu'un Caïnite récemment arrivé cherche des soutiens discrets.",
+        "Une rumeur évoque des disparitions que les mortels attribuent à des loups.",
+        "Un serviteur de la Cour collecte des noms avant une réunion dont le motif reste flou.",
+        "Un autre nouveau-né vous propose un échange d'informations sans témoin.",
+    )
+    raw = f"{character.character_id}:{character.chapter}:{character.segment}:{character.local_night}:hook"
+    index = hashlib.sha256(raw.encode("utf-8")).digest()[0] % len(options)
+    return options[index]
