@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from .models import (
-    BoonLevel,
     Domain,
     DomainDispute,
     DomainDisputeStatus,
@@ -179,7 +178,7 @@ def grant_hunting_right(
         beneficiary_id=beneficiary_id,
         granted_by_id=granted_by_id,
         created_night=state.night,
-        expires_night=state.night + duration_nights,
+        expires_night=state.night + duration_nights - 1,
         conditions=conditions.strip(),
         boon_id=boon_id,
     )
