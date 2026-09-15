@@ -6,6 +6,7 @@ from typing import Iterable, Mapping
 
 from .autonomy import resolve_autonomous_reactions
 from .config import DEFAULT_RULES, GameRules
+from .court import resolve_court_agenda
 from .domains import (
     grant_hunting_right,
     has_hunting_access,
@@ -189,11 +190,11 @@ def resolve_night(
     next_state = deepcopy(state)
     initialize_factions(next_state)
     initialize_domains(next_state)
+    had_prince_at_start = next_state.prince_id is not None
     actions = _validate_action_budget(next_state, actions, rules)
     candidates = list(candidates)
     candidate_map = {candidate.id: candidate for candidate in candidates}
 
-    # Les décisions internes précèdent les missions : elles peuvent modifier la coopération immédiate.
     for clan_id, order in request_decisions:
         next_state.events.append(
             process_request_decision(next_state, clan_id, order.request_id, order.decision)
@@ -216,8 +217,6 @@ def resolve_night(
     for clan_id, order in domain_decisions:
         next_state.events.append(_apply_domain_decision(next_state, clan_id, order))
 
-    # Toutes les missions voient le même état de début de phase. Leurs effets sont
-    # ensuite fusionnés, ce qui retire tout avantage à l'ordre de parcours.
     next_state.events.extend(resolve_actions_simultaneously(next_state, actions, rules))
 
     initialize_factions(next_state)
@@ -281,6 +280,9 @@ def resolve_night(
                 100.0, next_state.camarilla_stability + rules.recognized_stability_gain
             )
 
+    if had_prince_at_start and next_state.prince_id is not None:
+        next_state.events.extend(resolve_court_agenda(next_state, rules))
+
     petitions = list(embrace_petitions)
     if len(petitions) > len(next_state.clan_states) * rules.embrace_petitions_per_clan:
         raise ValueError("Too many embrace petitions")
@@ -294,7 +296,6 @@ def resolve_night(
                 )
             next_state = process_primogen_petition(next_state, clan_id, petition, rules)
 
-    # Réactions post-résolution : dettes appelées, griefs, promesses et opportunités de faction.
     next_state.events.extend(resolve_autonomous_reactions(next_state))
     next_state.events.extend(resolve_domain_pressure(next_state))
     initialize_factions(next_state)

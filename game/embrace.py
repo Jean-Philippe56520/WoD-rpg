@@ -3,6 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 
 from .config import DEFAULT_RULES, GameRules
+from .court import embrace_approval_score, prince_should_approve_embrace
 from .factions import initialize_factions
 from .models import (
     ClanFactionSide,
@@ -204,9 +205,22 @@ def process_primogen_petition(
         rules=rules,
     )
     request = list(next_state.embrace_requests.values())[-1]
-    relation = next_state.prince_relations.get(clan_id, 0.0)
-    approve = (
-        next_state.prince_political_capital >= request.political_cost
-        and relation >= rules.prince_auto_refusal_relation_floor
+    score = embrace_approval_score(next_state, member.id, request.political_cost, rules)
+    approve = prince_should_approve_embrace(
+        next_state,
+        member.id,
+        request.political_cost,
+        rules,
+    )
+    next_state.events.append(
+        GameEvent(
+            night=next_state.night,
+            category="cour",
+            message=(
+                f"Le Prince évalue la demande d'Étreinte de {member.name} : "
+                f"score politique {score:+.0f} (seuil {rules.prince_embrace_approval_threshold:+.0f})."
+            ),
+            audience_clan_ids=(clan_id,),
+        )
     )
     return decide_embrace_request(next_state, request.id, approve, rules)

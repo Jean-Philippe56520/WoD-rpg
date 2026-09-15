@@ -40,6 +40,17 @@ class GameRules:
     succession_loyalty_weight: float = 0.10
     succession_loyalty_reset: float = 50.0
 
+    # V0.12 : agenda et arbitrages autonomes du Prince.
+    prince_domain_arbitration_cost: float = 2.0
+    prince_masquerade_crisis_threshold: float = 96.0
+    prince_masquerade_response_cost: float = 3.0
+    prince_masquerade_response_gain: float = 3.0
+    prince_stability_crisis_threshold: float = 94.0
+    prince_stability_response_cost: float = 2.0
+    prince_stability_response_gain: float = 3.0
+    prince_capital_reserve: float = 8.0
+    prince_embrace_approval_threshold: float = 0.0
+
     embrace_base_cost: float = 10.0
     embrace_same_prince_clan_modifier: float = 3.0
     embrace_other_clan_modifier: float = -2.0
