@@ -132,6 +132,9 @@ def render_night_cycle(
     st.markdown("### Le reste de votre nuit")
     st.info(time_remaining_text(night_state.remaining_actions))
 
+    free_action_count = sum(
+        1 for item in night_state.log if item.get("kind") == "free_action"
+    )
     if night_state.remaining_actions > 0:
         st.caption(
             "Ces actions viennent de votre vampire : vous choisissez maintenant ce qu'il veut entreprendre avec le temps qui lui reste."
@@ -166,6 +169,7 @@ def render_night_cycle(
                     choice_id,
                     nights_per_segment=progress.nights_per_segment,
                     remaining_actions=night_state.remaining_actions,
+                    action_index=free_action_count + 1,
                     free_intent=free_intent,
                 )
                 night_store.apply_free_action(character, night_state, result)
@@ -174,9 +178,6 @@ def render_night_cycle(
                 st.session_state["wod_last_chronicle_notice"] = _step_notice(result)
                 st.rerun()
 
-    free_action_count = sum(
-        1 for item in night_state.log if item.get("kind") == "free_action"
-    )
     if night_state.remaining_actions == 0:
         st.caption("Il ne reste plus qu'à laisser venir l'aube et retenir les conséquences de cette nuit.")
     elif free_action_count == 0:
