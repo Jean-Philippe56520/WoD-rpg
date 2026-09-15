@@ -26,7 +26,9 @@ class QaScenario:
     status: int = 0
     personal_influence: float = 0.0
     sire_relation: int = 2
+    segment: int = 1
     local_night: int = 1
+    goal_progress: int = 0
     ready_for_convergence: bool = False
     memory_profile: str = "neutral"
     prestation_profile: str = "none"
@@ -82,11 +84,13 @@ QA_SCENARIOS: tuple[QaScenario, ...] = (
     ),
     QaScenario(
         id="convergence_ready",
-        label="Convergence prête — Ventrue",
-        description="Les trois nuits du segment sont terminées afin de tester l'avancée autonome du monde.",
+        label="Convergence narrative — Ventrue",
+        description="Cycle 2 achevé avec un tournant narratif suffisant pour tester continuation et clôture du chapitre.",
         clan_id="ventrue",
         character_name="Alix de Provins",
+        segment=2,
         local_night=3,
+        goal_progress=5,
         ready_for_convergence=True,
     ),
     QaScenario(
@@ -149,6 +153,16 @@ def ensure_qa_scenario(repository: Any, scenario_id: str) -> QaScenarioContext:
     progress = store.get_progress(personal.game_id)
     if progress is None:
         raise RuntimeError("QA Chronicle progress was not initialized")
+    if progress.segment != scenario.segment:
+        base = getattr(repository, "delegate", repository)
+        if hasattr(base, "client"):
+            raise RuntimeError("QA deterministic fixtures must remain SQLite-only")
+        with base._connect() as con:
+            con.execute(
+                "UPDATE wod_chronicle_progress SET segment=? WHERE game_id=?",
+                (scenario.segment, personal.game_id),
+            )
+        progress = replace(progress, segment=scenario.segment)
 
     character = create_player_character(
         game_id=personal.game_id,
@@ -171,7 +185,9 @@ def ensure_qa_scenario(repository: Any, scenario_id: str) -> QaScenarioContext:
         status=scenario.status,
         personal_influence=scenario.personal_influence,
         sire_relation=scenario.sire_relation,
+        segment=scenario.segment,
         local_night=scenario.local_night,
+        goal_progress=scenario.goal_progress,
         ready_for_convergence=scenario.ready_for_convergence,
     )
     store.create_character(character)
@@ -261,6 +277,7 @@ def qa_snapshot(repository: Any, scenario_id: str) -> dict[str, Any]:
             "influence": character.personal_influence,
             "sire_id": character.sire_id,
             "sire_relation": character.sire_relation,
+            "goal_progress": character.goal_progress,
             "local_night": character.local_night,
             "ready_for_convergence": character.ready_for_convergence,
         },

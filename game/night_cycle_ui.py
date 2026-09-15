@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import streamlit as st
 
+from .chronicle import CLAN_LABELS, OFFICE_LABELS
+from .chronicle_politics import primary_office
+from .chronicle_service import ChronicleService, chronicle_time_label, ellipse_label
 from .night_cycle import (
     NightPhase,
     choose_night_event,
@@ -59,6 +62,119 @@ def _step_notice(result) -> str:
     )
 
 
+def render_chronicle_header(character, profile, progress, simulation) -> None:
+    current_office = primary_office(simulation, character.character_id)
+    st.title(character.name)
+    st.caption(
+        f"{CLAN_LABELS[character.clan_id]} · {character.concept} · "
+        f"{profile.generation}e génération · Étreint en {character.embraced_year} · "
+        f"{OFFICE_LABELS.get(current_office, current_office)}"
+    )
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Année", progress.year)
+    col2.metric("Chapitre", progress.chapter)
+    col3.metric("Cycle", progress.segment)
+    current_night = progress.nights_per_segment if character.ready_for_convergence else character.local_night
+    col4.metric("Nuit significative", f"{current_night}/{progress.nights_per_segment}")
+
+    vital1, vital2, vital3, vital4, vital5, vital6 = st.columns(6)
+    vital1.metric("Faim", f"{character.hunger}/5")
+    vital2.metric("Humanité", f"{character.humanity}/10")
+    vital3.metric("Volonté", profile.willpower)
+    vital4.metric("Statut", character.status)
+    vital5.metric("Influence", f"{character.personal_influence:.1f}")
+    vital6.metric("Expérience", character.experience)
+
+
+def render_chronicle_journal(store, character) -> None:
+    history = store.list_history(character.game_id, character.character_id, limit=30)
+    if not history:
+        st.caption("Aucune nuit n'a encore été jouée.")
+        return
+    for item in history:
+        outcome = item.get("outcome_json") or {}
+        with st.container(border=True):
+            st.markdown(
+                f"**Chapitre {item['chapter']} · Cycle {item['segment']} · Nuit {item['night_number']}**"
+            )
+            st.write(outcome.get("summary", item["action"]))
+            detail = outcome.get("detail")
+            if detail:
+                st.caption(detail)
+
+
+def _convergence_notice(result) -> str:
+    beats = " ".join(beat.public_text for beat in result.world_beats[:2])
+    if result.chapter_closed:
+        notice = (
+            f"Le chapitre {result.previous_progress.chapter} s'achève. "
+            f"Après {ellipse_label(result.ellipse_months)}, la chronique reprend en "
+            f"{chronicle_time_label(result.next_progress.year, result.next_time.month)}."
+        )
+    else:
+        notice = (
+            f"Le monde avance et le Cycle {result.next_progress.segment} commence en "
+            f"{chronicle_time_label(result.next_progress.year, result.next_time.month)}."
+        )
+    if beats:
+        notice += f" Pendant ce temps : {beats}"
+    return notice
+
+
+def render_chronicle_convergence(repo, character, progress) -> None:
+    service = ChronicleService(repo)
+    time_state = service.get_time_state(character.game_id)
+    assessment = service.assess_chapter_closure(character.game_id)
+
+    st.subheader("Convergence")
+    st.write(
+        "Les trois Nuits significatives de ce Cycle sont terminées. Elles représentent les moments joués "
+        "qui comptent pour la chronique et ne sont pas nécessairement trois nuits civiles consécutives."
+    )
+    st.caption(
+        f"Repère temporel actuel : {chronicle_time_label(progress.year, time_state.month)}. "
+        "La Convergence laisse Paris, les lignages et les autres Caïnites agir avant le prochain Cycle."
+    )
+
+    if assessment.closable:
+        st.success(assessment.reason)
+        st.write(
+            "Vous pouvez continuer à jouer le même enjeu de chapitre, ou considérer que ce tournant clôt l'arc actuel. "
+            "Clore le chapitre déclenche une ellipse adaptée à l'âge et au statut du vampire."
+        )
+        left, right = st.columns(2)
+        if left.button(
+            "Continuer le chapitre",
+            type="secondary",
+            use_container_width=True,
+            key=f"continue_chapter_{progress.chapter}_{progress.segment}",
+        ):
+            result = service.resolve_convergence(character.game_id, close_chapter=False)
+            st.session_state["wod_last_chronicle_notice"] = _convergence_notice(result)
+            st.rerun()
+        if right.button(
+            "Clore le chapitre",
+            type="primary",
+            use_container_width=True,
+            key=f"close_chapter_{progress.chapter}_{progress.segment}",
+        ):
+            result = service.resolve_convergence(character.game_id, close_chapter=True)
+            st.session_state["wod_last_chronicle_notice"] = _convergence_notice(result)
+            st.rerun()
+        return
+
+    st.info(assessment.reason)
+    if st.button(
+        "Faire avancer le monde",
+        type="primary",
+        use_container_width=True,
+        key=f"advance_cycle_{progress.chapter}_{progress.segment}",
+    ):
+        result = service.resolve_convergence(character.game_id, close_chapter=False)
+        st.session_state["wod_last_chronicle_notice"] = _convergence_notice(result)
+        st.rerun()
+
+
 def render_night_cycle(
     store,
     profile_store,
@@ -72,7 +188,10 @@ def render_night_cycle(
     proposed_event = choose_night_event(character, profile, simulation, year=progress.year)
     night_state = night_store.ensure(character, event_id=proposed_event.id)
 
-    st.subheader(f"Nuit {character.local_night}")
+    st.subheader(f"Nuit significative {character.local_night}")
+    st.caption(
+        "Cette Nuit représente un moment important de la chronique. Du temps ordinaire peut s'écouler entre deux Nuits jouées."
+    )
 
     if night_state.phase == NightPhase.EVENT:
         event = _situation_for_id(
@@ -203,8 +322,11 @@ def render_night_cycle(
 
 
 def install_night_cycle_ui() -> None:
-    """Install the V0.45 night renderer without modifying the other Chronicle tabs."""
+    """Install the V0.46 Chronicle time and night renderers."""
 
     from . import chronicle_ui
 
+    chronicle_ui._render_header = render_chronicle_header
+    chronicle_ui._render_journal = render_chronicle_journal
+    chronicle_ui._render_convergence = render_chronicle_convergence
     chronicle_ui._render_night = render_night_cycle
