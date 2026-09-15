@@ -49,6 +49,21 @@ def choose_successor(
     return max(eligible, key=lambda character: (succession_score(state, character, rules), character.id))
 
 
+def _reset_relations_to_new_primogen(
+    state: GameState,
+    clan_id: str,
+    successor: Character,
+) -> None:
+    """Une relation au Primogène est attachée au titulaire, pas au siège abstrait."""
+    for member in state.characters.values():
+        if member.clan_id != clan_id or member.id == state.prince_id:
+            continue
+        if member.id == successor.id:
+            member.relation_to_primogen = 2
+            continue
+        member.relation_to_primogen = member.relations.get(successor.id, 1)
+
+
 def _apply_succession(state: GameState, outgoing: Character, rules: GameRules) -> Character:
     if not outgoing.clan_id:
         raise ValueError("A Primogen must belong to a clan")
@@ -58,11 +73,12 @@ def _apply_succession(state: GameState, outgoing: Character, rules: GameRules) -
 
     successor = choose_successor(state, outgoing.clan_id, outgoing.id, rules)
     successor.is_primogen = True
-    successor.relation_to_primogen = 2
     clan.primogen_id = successor.id
     clan_state.coterie_memberships[successor.id] = CoterieSide.PRIMOGEN
     if clan_state.opposition_leader_id == successor.id:
         clan_state.opposition_leader_id = None
+
+    _reset_relations_to_new_primogen(state, outgoing.clan_id, successor)
 
     for other_state in state.clan_states.values():
         if other_state.opposition_allied_primogen_id == outgoing.id:
