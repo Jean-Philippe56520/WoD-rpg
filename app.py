@@ -19,6 +19,7 @@ from game.browser_session import (
 )
 from game.coterie_ui import render_coteries_panel
 from game.court_ui import render_court_panel
+from game.crisis_ui import render_crises_panel
 from game.diplomatic_pact_ui import render_diplomatic_pacts_panel
 from game.external_pressure_ui import render_external_pressure_panel
 from game.hunger_ui import render_hunger_panel
@@ -131,7 +132,7 @@ mode = st.sidebar.radio(
     format_func=lambda value: "Chronique" if value == PRODUCTION_MODE else "Atelier (test/dev)",
     key="wod_runtime_mode_selector",
 )
-st.sidebar.caption("Moteur V0.19 — pressions extérieures")
+st.sidebar.caption("Moteur V0.20 — crises jouables")
 set_runtime_mode(mode)
 
 try:
@@ -189,4 +190,5 @@ if "state" in globals() and "player_clan" in globals() and player_clan:
     render_information_panel(state, player_clan)
     render_agency_panel(state, player_clan)
     render_diplomatic_pacts_panel(state, player_clan)
+    render_crises_panel(state, player_clan)
     render_external_pressure_panel(state, player_clan)
