@@ -150,6 +150,48 @@ def _may_administer_domain(state: GameState, domain: Domain, character_id: str) 
     return character_id == domain.holder_id or character_id == state.prince_id
 
 
+def assign_domain_holder(
+    state: GameState,
+    *,
+    domain_id: str,
+    new_holder_id: str | None,
+    granted_by_id: str,
+) -> Domain:
+    """Attribue ou retire un Domaine. Cette prérogative appartient au Prince reconnu."""
+
+    domain = state.domains.get(domain_id)
+    if domain is None:
+        raise ValueError("Unknown domain")
+    if state.prince_id is None or granted_by_id != state.prince_id:
+        raise ValueError("Only the recognized Prince may assign a Domain")
+    if new_holder_id is not None and new_holder_id not in state.characters:
+        raise ValueError("Domain holder must be a known vampire")
+    if new_holder_id == state.prince_id:
+        raise ValueError("The Prince may arbitrate Domains but cannot receive one through this operation")
+
+    old_holder_id = domain.holder_id
+    if old_holder_id == new_holder_id:
+        return domain
+
+    domain.holder_id = new_holder_id
+    domain.grantor_id = granted_by_id
+    if old_holder_id and old_holder_id != granted_by_id:
+        open_domain_dispute(
+            state,
+            domain_id=domain.id,
+            claimant_id=old_holder_id,
+            respondent_id=granted_by_id,
+            reason=(
+                f"Le Prince retire {domain.name} à son ancien détenteur"
+                if new_holder_id is None
+                else f"Le Prince réattribue {domain.name}"
+            ),
+            severity=2,
+            public=True,
+        )
+    return domain
+
+
 def grant_hunting_right(
     state: GameState,
     *,
