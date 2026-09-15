@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import game.night_cycle as night_cycle
 from game.chronicle_simulation_store import ChronicleSimulationStore
 from game.chronicle_store import ChronicleStore
 from game.editable_repository import EditableSQLiteGameRepository
@@ -130,6 +131,77 @@ def test_careful_hunt_can_consume_all_remaining_free_time(tmp_path):
     assert result.action_cost == 2
     assert result.remaining_actions == 0
     assert result.resolution.outcome.updated_character.local_night == character.local_night
+
+
+def test_free_actions_use_distinct_deterministic_step_nonces(monkeypatch, tmp_path):
+    _, _, _, progress, character, profile, simulation = _state(tmp_path, "high_hunger")
+    event = choose_night_event(character, profile, simulation, year=progress.year)
+    action = next(
+        item
+        for item in free_action_situations(
+            character, profile, simulation, year=progress.year, event_id=event.id
+        )
+        if item.id.startswith("hunt_")
+    )
+    choice_id = action.choices[0].id
+    seen_choice_ids: list[str] = []
+    original = night_cycle.resolve_situation
+
+    def capture(character_arg, profile_arg, simulation_arg, situation_arg, seeded_choice_id, **kwargs):
+        seen_choice_ids.append(seeded_choice_id)
+        return original(
+            character_arg,
+            profile_arg,
+            simulation_arg,
+            situation_arg,
+            seeded_choice_id,
+            **kwargs,
+        )
+
+    monkeypatch.setattr(night_cycle, "resolve_situation", capture)
+    first = resolve_free_action(
+        character,
+        profile,
+        simulation,
+        action,
+        choice_id,
+        nights_per_segment=progress.nights_per_segment,
+        remaining_actions=2,
+        action_index=1,
+    )
+    second = resolve_free_action(
+        character,
+        profile,
+        simulation,
+        action,
+        choice_id,
+        nights_per_segment=progress.nights_per_segment,
+        remaining_actions=2,
+        action_index=2,
+    )
+
+    assert seen_choice_ids == [f"{choice_id}@free:1", f"{choice_id}@free:2"]
+    assert first.resolution.choice.id == choice_id
+    assert second.resolution.choice.id == choice_id
+
+
+def test_unresolved_obsolete_event_is_rebound_without_blocking_the_night(tmp_path):
+    repo, context, _, progress, character, profile, simulation = _state(tmp_path, "first_night")
+    event = choose_night_event(character, profile, simulation, year=progress.year)
+    night_store = NightCycleStore(repo)
+    state = night_store.ensure(character, event_id=event.id)
+    assert state.phase == NightPhase.EVENT and not state.log
+
+    with repo._connect() as con:
+        con.execute(
+            "UPDATE wod_character_night_state SET event_id=? WHERE game_id=? AND player_id=?",
+            ("obsolete_event", context.game_id, context.player_id),
+        )
+
+    recovered = night_store.ensure(character, event_id=event.id)
+    assert recovered.event_id == event.id
+    assert recovered.phase == NightPhase.EVENT
+    assert recovered.log == ()
 
 
 def test_intense_sire_relationship_makes_sire_event_relevant(tmp_path):
