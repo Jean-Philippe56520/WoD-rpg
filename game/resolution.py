@@ -16,6 +16,7 @@ from .domains import (
     revoke_hunting_right,
 )
 from .embrace import process_primogen_petition
+from .external_pressures import resolve_external_pressures
 from .factions import determine_faction_stances, initialize_factions
 from .hunger import resolve_hunger
 from .models import (
@@ -316,9 +317,13 @@ def resolve_night(
             next_state = process_primogen_petition(next_state, clan_id, petition, rules)
 
     next_state.events.extend(resolve_autonomous_reactions(next_state, rules))
-    # La chasse de routine se produit avant l'expiration territoriale de fin de
-    # nuit : un droit reste donc exploitable pendant sa nuit d'échéance incluse.
+    # La chasse de routine se produit avant les conséquences territoriales de fin
+    # de nuit : un droit reste exploitable pendant sa nuit d'échéance incluse.
     next_state.events.extend(resolve_hunger(next_state))
+    # Les menaces extérieures exploitent l'état politique et la Mascarade tels
+    # qu'ils ressortent de toute la nuit. Leur pression territoriale peut donc
+    # encore provoquer un incident de Domaine dans cette même résolution.
+    next_state.events.extend(resolve_external_pressures(next_state, rules))
     next_state.events.extend(resolve_domain_pressure(next_state))
     initialize_factions(next_state)
 
