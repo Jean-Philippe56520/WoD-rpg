@@ -5,6 +5,8 @@ from enum import Enum
 from typing import Any, Mapping, Sequence
 
 from .chronicle import PlayerCharacter
+from .dice import rouse_check
+from .mecaniques_vampiriques import bonus_coup_de_sang, usage_discipline
 from .praxis import apply_praxis_claim
 from .relationship_memory import memory_for
 from .situations import Situation, SituationResolution, generate_situations, resolve_situation
@@ -16,6 +18,13 @@ MAX_FREE_ACTIONS = 2
 class NightPhase(str, Enum):
     EVENT = "event"
     FREE_ACTIONS = "free_actions"
+
+
+@dataclass(frozen=True)
+class OptionsResolution:
+    depenser_volonte: bool = False
+    coup_de_sang: bool = False
+    utiliser_discipline: bool = False
 
 
 @dataclass(frozen=True)
@@ -50,6 +59,87 @@ def _same_night(character: PlayerCharacter, resolution: SituationResolution) -> 
     return replace(resolution, outcome=replace(resolution.outcome, updated_character=after))
 
 
+def _preparer_leviers(
+    character: PlayerCharacter,
+    profile,
+    situation: Situation,
+    choice,
+    *,
+    options: OptionsResolution,
+    step_nonce: str,
+) -> tuple[PlayerCharacter, Any, bool, tuple[str, ...]]:
+    bonus = 0
+    notes: list[str] = []
+    personnage_prepare = character
+
+    if options.coup_de_sang:
+        if character.hunger >= 5:
+            raise ValueError("Le Coup de Sang est impossible lorsque la Faim est déjà à 5.")
+        gain = bonus_coup_de_sang(profile.blood_potency)
+        _, nouvelle_faim = rouse_check(
+            hunger=character.hunger,
+            seed=(
+                f"{character.character_id}:{character.chapter}:{character.segment}:"
+                f"{character.local_night}:{situation.id}:{choice.id}:{step_nonce}:exaltation"
+            ),
+        )
+        personnage_prepare = replace(character, hunger=nouvelle_faim)
+        bonus += gain
+        if nouvelle_faim > character.hunger:
+            notes.append(
+                f"Coup de Sang : +{gain} dés ; le Test d’Exaltation augmente la Faim de 1."
+            )
+        else:
+            notes.append(
+                f"Coup de Sang : +{gain} dés ; le Test d’Exaltation n’augmente pas la Faim."
+            )
+
+    if options.utiliser_discipline:
+        usage = usage_discipline(profile, situation, choice)
+        if usage is None:
+            raise ValueError("Aucun pouvoir de Discipline actuellement modélisé ne s’applique à cette action.")
+        bonus += usage.bonus_des
+        notes.append(
+            f"{usage.discipline} — {usage.pouvoir} : +{usage.bonus_des} dé(s). {usage.description}"
+        )
+
+    autoriser_volonte = options.depenser_volonte
+    if autoriser_volonte and profile.willpower <= 0:
+        raise ValueError("Aucun point de Volonté n’est disponible pour cette relance.")
+
+    profil_prepare = replace(profile, bonus_resolution=bonus)
+    return personnage_prepare, profil_prepare, autoriser_volonte, tuple(notes)
+
+
+def _finaliser_leviers(
+    resolution: SituationResolution,
+    profile_initial,
+    notes: tuple[str, ...],
+) -> SituationResolution:
+    profil_final = replace(resolution.profile, bonus_resolution=0)
+    details = list(notes)
+
+    if resolution.dice.relances_volonte > 0:
+        profil_final = replace(
+            profil_final,
+            willpower=max(0, profile_initial.willpower - 1),
+        )
+        details.append(
+            f"Volonté : 1 point dépensé pour relancer {resolution.dice.relances_volonte} dé(s) ordinaire(s)."
+        )
+
+    detail_existant = resolution.outcome.detail.strip()
+    detail_leviers = " ".join(details).strip()
+    nouveau_detail = " ".join(
+        part for part in (detail_leviers, detail_existant) if part
+    )
+    return replace(
+        resolution,
+        profile=profil_final,
+        outcome=replace(resolution.outcome, detail=nouveau_detail),
+    )
+
+
 def _resolve_with_step_nonce(
     character: PlayerCharacter,
     profile,
@@ -60,21 +150,30 @@ def _resolve_with_step_nonce(
     nights_per_segment: int,
     free_intent: str,
     step_nonce: str,
+    options: OptionsResolution | None = None,
 ) -> SituationResolution:
-    """Keep deterministic rolls while avoiding identical rolls for repeated actions.
-
-    ``resolve_situation`` seeds dice from situation/choice/night identifiers. Inside
-    V0.45 a player may perform the same action twice during one night, so a stable
-    step nonce is injected into the selected choice id for the roll only. The
-    public resolution is restored to the canonical situation and choice ids.
-    """
+    """Résout une étape de nuit de façon déterministe et sûre en cas de nouvel essai."""
 
     try:
         canonical_choice = next(item for item in situation.choices if item.id == choice_id)
     except StopIteration as exc:
-        raise ValueError("Unknown situation choice") from exc
+        raise ValueError("Décision de situation inconnue") from exc
 
-    seeded_choice = replace(canonical_choice, id=f"{canonical_choice.id}@{step_nonce}")
+    options = options or OptionsResolution()
+    personnage_prepare, profil_prepare, autoriser_volonte, notes = _preparer_leviers(
+        character,
+        profile,
+        situation,
+        canonical_choice,
+        options=options,
+        step_nonce=step_nonce,
+    )
+
+    marqueur_volonte = "@volonte" if autoriser_volonte else ""
+    seeded_choice = replace(
+        canonical_choice,
+        id=f"{canonical_choice.id}@{step_nonce}{marqueur_volonte}",
+    )
     seeded_situation = replace(
         situation,
         choices=tuple(
@@ -83,14 +182,15 @@ def _resolve_with_step_nonce(
         ),
     )
     resolution = resolve_situation(
-        character,
-        profile,
+        personnage_prepare,
+        profil_prepare,
         simulation,
         seeded_situation,
         seeded_choice.id,
         nights_per_segment=nights_per_segment,
         free_intent=free_intent,
     )
+    resolution = _finaliser_leviers(resolution, profile, notes)
     resolution = replace(resolution, situation=situation, choice=canonical_choice)
     if canonical_choice.effect == "praxis_claim":
         resolution = apply_praxis_claim(resolution, character)
@@ -151,8 +251,6 @@ def choose_night_event(
         if intensity >= 4:
             return sire_event
 
-    # A real consequence of the preceding Convergence takes priority over the
-    # generic fallback once personal sire obligations have been checked.
     emergent = next((item for item in candidates if item.id.startswith("world_event_")), None)
     if emergent is not None:
         return emergent
@@ -217,6 +315,7 @@ def resolve_night_event(
     *,
     nights_per_segment: int,
     free_intent: str = "",
+    options: OptionsResolution | None = None,
 ) -> NightStepResult:
     resolution = _same_night(
         character,
@@ -229,6 +328,7 @@ def resolve_night_event(
             nights_per_segment=nights_per_segment,
             free_intent=free_intent,
             step_nonce="event",
+            options=options,
         ),
     )
     remaining, consequence = _event_budget(character, resolution)
@@ -246,11 +346,12 @@ def resolve_free_action(
     remaining_actions: int,
     action_index: int = 1,
     free_intent: str = "",
+    options: OptionsResolution | None = None,
 ) -> NightStepResult:
     if remaining_actions <= 0:
-        raise ValueError("No free action remains this night")
+        raise ValueError("Aucune action libre ne reste disponible cette nuit")
     if action_index < 1:
-        raise ValueError("Free action index must be positive")
+        raise ValueError("L’index d’action libre doit être positif")
     resolution = _same_night(
         character,
         _resolve_with_step_nonce(
@@ -262,6 +363,7 @@ def resolve_free_action(
             nights_per_segment=nights_per_segment,
             free_intent=free_intent,
             step_nonce=f"free:{action_index}",
+            options=options,
         ),
     )
     cost = remaining_actions if situation.id.startswith("hunt_") and choice_id == "careful_hunt" else 1
@@ -299,6 +401,7 @@ def log_entry(kind: str, result: NightStepResult) -> dict[str, Any]:
         "detail": r.outcome.detail,
         "successes": r.dice.successes,
         "difficulty": r.dice.difficulty,
+        "relances_volonte": r.dice.relances_volonte,
         "remaining_actions_after": result.remaining_actions,
         "consequence": result.consequence,
     }
