@@ -12,6 +12,7 @@ from .models import (
     ClanNightOrders,
     ClanNightReport,
     ClanPoliticalState,
+    CoterieSide,
     EmbracePetitionOrder,
     EmbraceRequest,
     EmbraceStatus,
@@ -38,6 +39,8 @@ def _character_to_dict(character: Character) -> dict:
         "disciplines": dict(character.disciplines),
         "blood_rank": character.blood_rank.value,
         "backgrounds": dict(character.backgrounds),
+        "relation_to_primogen": character.relation_to_primogen,
+        "relations": dict(character.relations),
         "loyalty": character.loyalty,
         "ambition": character.ambition,
         "is_primogen": character.is_primogen,
@@ -51,13 +54,20 @@ def _legacy_axis(value: dict, new_key: str, old_key: str) -> AxisPolarity:
     return AxisPolarity.PLUS if legacy_value >= 0 else AxisPolarity.MINUS
 
 
-def _character_from_dict(value: dict, default_sheet: Character | None = None) -> Character:
-    """Lit V0.7 et enrichit les anciens personnages V0.6 avec leur fiche canonique.
+def _legacy_relation_to_primogen(value: dict, default_sheet: Character | None) -> int:
+    if "relation_to_primogen" in value:
+        return int(value["relation_to_primogen"])
+    if "loyalty" in value:
+        loyalty = float(value["loyalty"])
+        if loyalty >= 67:
+            return 2
+        if loyalty >= 40:
+            return 1
+        return 0
+    return default_sheet.relation_to_primogen if default_sheet else 1
 
-    Les données politiques vivantes stockées en partie (influence, loyauté, ambition,
-    fonctions et axes historiques) restent prioritaires. Seuls les nouveaux champs de
-    fiche absents sont complétés depuis le personnage initial correspondant.
-    """
+
+def _character_from_dict(value: dict, default_sheet: Character | None = None) -> Character:
     physical_default = default_sheet.physical if default_sheet else 1
     social_default = default_sheet.social if default_sheet else 1
     mental_default = default_sheet.mental if default_sheet else 1
@@ -65,6 +75,7 @@ def _character_from_dict(value: dict, default_sheet: Character | None = None) ->
     discipline_default = default_sheet.disciplines if default_sheet else {}
     blood_rank_default = default_sheet.blood_rank if default_sheet else BloodRank.NEWBORN
     background_default = default_sheet.backgrounds if default_sheet else {}
+    relations_default = default_sheet.relations if default_sheet else {}
 
     return Character(
         id=value["id"],
@@ -86,6 +97,10 @@ def _character_from_dict(value: dict, default_sheet: Character | None = None) ->
             k: int(v)
             for k, v in value.get("backgrounds", background_default).items()
         },
+        relation_to_primogen=_legacy_relation_to_primogen(value, default_sheet),
+        relations={
+            k: int(v) for k, v in value.get("relations", relations_default).items()
+        },
         loyalty=float(value.get("loyalty", 50.0)),
         ambition=float(value.get("ambition", 50.0)),
         is_primogen=bool(value.get("is_primogen", False)),
@@ -105,9 +120,16 @@ def game_state_to_dict(state: GameState) -> dict:
         "clan_states": {
             key: {
                 "clan": asdict(value.clan),
+                "coterie_memberships": {
+                    character_id: CoterieSide(side).value
+                    for character_id, side in value.coterie_memberships.items()
+                },
+                "opposition_leader_id": value.opposition_leader_id,
+                "opposition_allied_primogen_id": value.opposition_allied_primogen_id,
+                "known_character_intel": value.known_character_intel,
+                "relations": value.relations,
                 "current_loyalties": value.current_loyalties,
                 "current_allies": value.current_allies,
-                "relations": value.relations,
             }
             for key, value in state.clan_states.items()
         },
@@ -146,9 +168,9 @@ def game_state_from_dict(data: dict) -> GameState:
         or "disciplines" not in value
         or "blood_rank" not in value
         or "backgrounds" not in value
+        or "relation_to_primogen" not in value
         for value in character_payloads.values()
     ):
-        # Import local pour éviter de coupler le chemin de sérialisation au monde au chargement.
         from .world import seed_characters
 
         defaults = seed_characters()
@@ -160,9 +182,20 @@ def game_state_from_dict(data: dict) -> GameState:
     clan_states = {
         key: ClanPoliticalState(
             clan=Clan(**value["clan"]),
-            current_loyalties={k: float(v) for k, v in value.get("current_loyalties", {}).items()},
-            current_allies=dict(value.get("current_allies", {})),
+            coterie_memberships={
+                character_id: CoterieSide(side)
+                for character_id, side in value.get("coterie_memberships", {}).items()
+            },
+            opposition_leader_id=value.get("opposition_leader_id"),
+            opposition_allied_primogen_id=value.get("opposition_allied_primogen_id"),
+            known_character_intel={
+                k: int(v) for k, v in value.get("known_character_intel", {}).items()
+            },
             relations={k: float(v) for k, v in value.get("relations", {}).items()},
+            current_loyalties={
+                k: float(v) for k, v in value.get("current_loyalties", {}).items()
+            },
+            current_allies=dict(value.get("current_allies", {})),
         )
         for key, value in data.get("clan_states", {}).items()
     }
@@ -193,7 +226,7 @@ def game_state_from_dict(data: dict) -> GameState:
         )
         for event in data.get("events", [])
     ]
-    return GameState(
+    state = GameState(
         night=int(data.get("night", 1)),
         camarilla_stability=float(data.get("camarilla_stability", 100.0)),
         masquerade_integrity=float(data.get("masquerade_integrity", 100.0)),
@@ -206,6 +239,10 @@ def game_state_from_dict(data: dict) -> GameState:
         embrace_requests=embrace_requests,
         events=events,
     )
+    from .coteries import initialize_coteries
+
+    initialize_coteries(state)
+    return state
 
 
 def game_state_to_json(state: GameState) -> str:
@@ -218,11 +255,14 @@ def game_state_from_json(raw: str) -> GameState:
 
 def clan_orders_to_dict(orders: ClanNightOrders) -> dict:
     return {
+        "version": orders.version,
         "clan_id": orders.clan_id,
         "actions": [
             {
                 "clan_id": action.clan_id,
                 "action_type": action.action_type.value,
+                "actor_character_id": action.actor_character_id,
+                "target_character_id": action.target_character_id,
                 "target_clan_id": action.target_clan_id,
                 "target_current_id": action.target_current_id,
             }
@@ -247,6 +287,8 @@ def clan_orders_from_dict(data: dict) -> ClanNightOrders:
             GameAction(
                 clan_id=action["clan_id"],
                 action_type=ActionType(action["action_type"]),
+                actor_character_id=action.get("actor_character_id"),
+                target_character_id=action.get("target_character_id"),
                 target_clan_id=action.get("target_clan_id"),
                 target_current_id=action.get("target_current_id"),
             )
@@ -264,6 +306,7 @@ def clan_orders_from_dict(data: dict) -> ClanNightOrders:
             EmbracePetitionOrder(**petition)
             for petition in data.get("embrace_petitions", [])
         ),
+        version=int(data.get("version", 1)),
     )
 
 
