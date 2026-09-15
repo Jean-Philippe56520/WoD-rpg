@@ -1,23 +1,20 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field, replace
-import hashlib
+from dataclasses import dataclass, replace
 from typing import Any, Iterable
 
 
-MAX_MEMORY_EVENTS = 24
-MAX_GRIEVANCES = 8
+_MEMORY_PREFIX = "@memory"
 
 
 @dataclass(frozen=True)
 class RelationshipMemoryEvent:
-    id: str
-    year: int
     chapter: int
     segment: int
     night: int
     category: str
     summary: str
+    detail: str
     valence: int = 0
 
 
@@ -29,71 +26,87 @@ class RelationshipMemoryState:
     trust: int = 0
     respect: int = 0
     fear: int = 0
-    known_facts: tuple[str, ...] = ()
-    grievances: tuple[str, ...] = ()
-    events: tuple[RelationshipMemoryEvent, ...] = ()
+    awareness: int = 0
+    grievance_count: int = 0
     last_interaction_year: int | None = None
+    known_facts: tuple[str, ...] = ()
 
 
-def relationship_memory_key(npc_id: str, character_id: str) -> str:
-    return f"{npc_id}::{character_id}"
+def _metric_key(metric: str, character_id: str) -> str:
+    return f"{_MEMORY_PREFIX}:{metric}:{character_id}"
 
 
 def _bounded(value: int, low: int = -3, high: int = 3) -> int:
     return max(low, min(high, int(value)))
 
 
-def _unique_limited(values: Iterable[str], *, limit: int) -> tuple[str, ...]:
-    ordered: list[str] = []
-    for raw in values:
-        value = str(raw).strip()
-        if value and value not in ordered:
-            ordered.append(value)
-    return tuple(ordered[-limit:])
+def _metric(relations: dict[str, int], metric: str, character_id: str, default: int = 0) -> int:
+    return int(relations.get(_metric_key(metric, character_id), default))
 
 
-def memory_for(state: Any, npc_id: str | None, character_id: str) -> RelationshipMemoryState | None:
-    if not npc_id:
-        return None
-    return state.relationship_memories.get(relationship_memory_key(npc_id, character_id))
+def _has_memory(relations: dict[str, int], character_id: str) -> bool:
+    return _metric_key("awareness", character_id) in relations or character_id in relations
 
 
-def ensure_character_memory(
-    state: Any,
-    character: Any,
-    npc_id: str | None,
-) -> Any:
+def memory_for(state: Any, npc_id: str | None, character: Any) -> RelationshipMemoryState | None:
     if not npc_id or npc_id not in state.npcs:
-        return state
-    key = relationship_memory_key(npc_id, character.character_id)
-    if key in state.relationship_memories:
-        return state
+        return None
+    npc = state.npcs[npc_id]
+    relations = npc.relations
+    if not _has_memory(relations, character.character_id) and npc_id != character.sire_id:
+        return None
 
-    known_facts = (
-        f"name:{character.name}",
-        f"clan:{character.clan_id}",
-        f"sire:{character.sire_id}",
-    )
-    disposition = 0
-    trust = 0
-    respect = 0
-    if npc_id == character.sire_id:
-        # Legacy ``sire_relation`` stays authoritative for old saves while the
-        # richer memory starts from an equivalent, non-extreme baseline.
-        trust = _bounded(character.sire_relation - 1)
+    if character.character_id in relations:
+        disposition = int(relations[character.character_id])
+    elif npc_id == character.sire_id:
         disposition = _bounded(character.sire_relation - 2)
-        known_facts += ("relationship:sire", "status:infant")
+    else:
+        disposition = 0
 
-    memories = dict(state.relationship_memories)
-    memories[key] = RelationshipMemoryState(
+    trust_default = _bounded(character.sire_relation - 1) if npc_id == character.sire_id else 0
+    known_facts = [f"Nom : {character.name}", f"Clan : {character.clan_id.title()}"]
+    if npc_id == character.sire_id:
+        known_facts.extend(("Lien : sire", "Position initiale : infant sous responsabilité"))
+    if _metric(relations, "awareness", character.character_id, 0) >= 2:
+        known_facts.append(f"Sire connu : {character.sire_name}")
+    if _metric(relations, "awareness", character.character_id, 0) >= 3:
+        known_facts.append(f"Réputation publique : {character.reputation:+d}")
+
+    last_year = _metric(relations, "lastyear", character.character_id, 0)
+    return RelationshipMemoryState(
         npc_id=npc_id,
         character_id=character.character_id,
-        disposition=disposition,
-        trust=trust,
-        respect=respect,
-        known_facts=known_facts,
+        disposition=_bounded(disposition),
+        trust=_bounded(_metric(relations, "trust", character.character_id, trust_default)),
+        respect=_bounded(_metric(relations, "respect", character.character_id, 0)),
+        fear=_bounded(_metric(relations, "fear", character.character_id, 0), 0, 3),
+        awareness=max(0, min(5, _metric(relations, "awareness", character.character_id, 1))),
+        grievance_count=max(0, _metric(relations, "grievances", character.character_id, 0)),
+        last_interaction_year=last_year or None,
+        known_facts=tuple(known_facts),
     )
-    return replace(state, relationship_memories=memories)
+
+
+def ensure_character_memory(state: Any, character: Any, npc_id: str | None) -> Any:
+    if not npc_id or npc_id not in state.npcs:
+        return state
+    npc = state.npcs[npc_id]
+    if _has_memory(npc.relations, character.character_id):
+        return state
+
+    relations = dict(npc.relations)
+    relations[character.character_id] = _bounded(character.sire_relation - 2) if npc_id == character.sire_id else 0
+    relations[_metric_key("trust", character.character_id)] = (
+        _bounded(character.sire_relation - 1) if npc_id == character.sire_id else 0
+    )
+    relations[_metric_key("respect", character.character_id)] = 0
+    relations[_metric_key("fear", character.character_id)] = 0
+    relations[_metric_key("awareness", character.character_id)] = 2 if npc_id == character.sire_id else 1
+    relations[_metric_key("grievances", character.character_id)] = 0
+    relations[_metric_key("lastyear", character.character_id)] = 0
+    npcs = dict(state.npcs)
+    npcs[npc_id] = replace(npc, relations=relations)
+    return replace(state, npcs=npcs)
 
 
 def record_relationship_memory(
@@ -101,92 +114,68 @@ def record_relationship_memory(
     character: Any,
     npc_id: str | None,
     *,
-    category: str,
-    summary: str,
     year: int,
-    chapter: int,
-    segment: int,
-    night: int,
     disposition_delta: int = 0,
     trust_delta: int = 0,
     respect_delta: int = 0,
     fear_delta: int = 0,
-    known_facts: Iterable[str] = (),
-    grievance: str | None = None,
-    valence: int = 0,
+    awareness_delta: int = 1,
+    grievance: bool = False,
 ) -> Any:
     if not npc_id or npc_id not in state.npcs:
         return state
     state = ensure_character_memory(state, character, npc_id)
-    key = relationship_memory_key(npc_id, character.character_id)
-    memory = state.relationship_memories[key]
+    npc = state.npcs[npc_id]
+    relations = dict(npc.relations)
+    character_id = character.character_id
 
-    seed = (
-        f"{state.game_id}:{npc_id}:{character.character_id}:{year}:{chapter}:"
-        f"{segment}:{night}:{category}:{summary}"
+    relations[character_id] = _bounded(relations.get(character_id, 0) + disposition_delta)
+    relations[_metric_key("trust", character_id)] = _bounded(
+        _metric(relations, "trust", character_id) + trust_delta
     )
-    event_id = "memory_" + hashlib.sha256(seed.encode("utf-8")).hexdigest()[:16]
-    events = list(memory.events)
-    if not any(item.id == event_id for item in events):
-        events.append(
-            RelationshipMemoryEvent(
-                id=event_id,
-                year=int(year),
-                chapter=int(chapter),
-                segment=int(segment),
-                night=int(night),
-                category=str(category),
-                summary=str(summary).strip(),
-                valence=_bounded(valence),
-            )
-        )
-    events = events[-MAX_MEMORY_EVENTS:]
-
-    grievances = list(memory.grievances)
+    relations[_metric_key("respect", character_id)] = _bounded(
+        _metric(relations, "respect", character_id) + respect_delta
+    )
+    relations[_metric_key("fear", character_id)] = _bounded(
+        _metric(relations, "fear", character_id) + fear_delta, 0, 3
+    )
+    relations[_metric_key("awareness", character_id)] = max(
+        0, min(5, _metric(relations, "awareness", character_id) + awareness_delta)
+    )
     if grievance:
-        grievances.append(grievance)
+        relations[_metric_key("grievances", character_id)] = min(
+            9, _metric(relations, "grievances", character_id) + 1
+        )
+    relations[_metric_key("lastyear", character_id)] = int(year)
 
-    memories = dict(state.relationship_memories)
-    memories[key] = replace(
-        memory,
-        disposition=_bounded(memory.disposition + disposition_delta),
-        trust=_bounded(memory.trust + trust_delta),
-        respect=_bounded(memory.respect + respect_delta),
-        fear=_bounded(memory.fear + fear_delta, 0, 3),
-        known_facts=_unique_limited((*memory.known_facts, *known_facts), limit=24),
-        grievances=_unique_limited(grievances, limit=MAX_GRIEVANCES),
-        events=tuple(events),
-        last_interaction_year=int(year),
-    )
-    return replace(state, relationship_memories=memories)
+    npcs = dict(state.npcs)
+    npcs[npc_id] = replace(npc, relations=relations)
+    return replace(state, npcs=npcs)
 
 
-def memories_for_character(state: Any, character_id: str) -> tuple[RelationshipMemoryState, ...]:
-    memories = [
-        memory
-        for memory in state.relationship_memories.values()
-        if memory.character_id == character_id
-    ]
-    memories.sort(
+def memories_for_character(state: Any, character: Any) -> tuple[RelationshipMemoryState, ...]:
+    result: list[RelationshipMemoryState] = []
+    for npc_id in state.npcs:
+        memory = memory_for(state, npc_id, character)
+        if memory is not None:
+            result.append(memory)
+    result.sort(
         key=lambda item: (
+            item.npc_id != character.sire_id,
             -(abs(item.disposition) + abs(item.trust) + abs(item.respect) + item.fear),
             -(item.last_interaction_year or 0),
             item.npc_id,
         )
     )
-    return tuple(memories)
+    return tuple(result)
 
 
-def relationship_difficulty_adjustment(
-    state: Any,
-    npc_id: str | None,
-    character_id: str,
-) -> int:
-    memory = memory_for(state, npc_id, character_id)
+def relationship_difficulty_adjustment(state: Any, npc_id: str | None, character: Any) -> int:
+    memory = memory_for(state, npc_id, character)
     if memory is None:
         return 0
     favorable = memory.disposition + memory.trust + memory.respect
-    hostile = len(memory.grievances) + max(0, -memory.disposition) + max(0, -memory.trust)
+    hostile = memory.grievance_count + max(0, -memory.disposition) + max(0, -memory.trust)
     if favorable >= 5 and hostile == 0:
         return -1
     if hostile >= 4 or favorable <= -3:
@@ -194,13 +183,43 @@ def relationship_difficulty_adjustment(
     return 0
 
 
+def relationship_tags(npc_id: str | None, category: str, valence: int) -> tuple[str, ...]:
+    if not npc_id:
+        return ()
+    bounded = _bounded(valence)
+    return (f"actor:{npc_id}", f"relation:{category}", f"valence:{bounded:+d}")
+
+
+def events_from_history(history: Iterable[dict[str, Any]], npc_id: str) -> tuple[RelationshipMemoryEvent, ...]:
+    events: list[RelationshipMemoryEvent] = []
+    actor_tag = f"actor:{npc_id}"
+    for item in history:
+        outcome = item.get("outcome_json") or {}
+        tags = tuple(str(tag) for tag in outcome.get("tags", ()))
+        if actor_tag not in tags:
+            continue
+        category = next((tag.removeprefix("relation:") for tag in tags if tag.startswith("relation:")), "interaction")
+        raw_valence = next((tag.removeprefix("valence:") for tag in tags if tag.startswith("valence:")), "0")
+        try:
+            valence = _bounded(int(raw_valence))
+        except ValueError:
+            valence = 0
+        events.append(
+            RelationshipMemoryEvent(
+                chapter=int(item["chapter"]),
+                segment=int(item["segment"]),
+                night=int(item["night_number"]),
+                category=category,
+                summary=str(outcome.get("summary", item.get("action", "Interaction"))),
+                detail=str(outcome.get("detail", "")),
+                valence=valence,
+            )
+        )
+    return tuple(events)
+
+
 def prestation_balance(state: Any, npc_id: str, character_id: str) -> int:
-    """Return leverage from the NPC perspective without duplicating the boon ledger.
-
-    Positive means the character owes the NPC; negative means the NPC owes the
-    character. Major and life boons weigh more than minor boons.
-    """
-
+    """Leverage from the NPC perspective, derived from the canonical boon ledger."""
     weights = {"minor": 1, "major": 2, "life": 3}
     balance = 0
     for boon in state.boons.values():
@@ -215,19 +234,15 @@ def prestation_balance(state: Any, npc_id: str, character_id: str) -> int:
 
 
 def qualitative_relation(value: int) -> str:
-    if value >= 3:
-        return "très favorable"
-    if value == 2:
-        return "favorable"
-    if value == 1:
-        return "plutôt favorable"
-    if value == 0:
-        return "neutre"
-    if value == -1:
-        return "réservée"
-    if value == -2:
-        return "hostile"
-    return "très hostile"
+    return {
+        -3: "très hostile",
+        -2: "hostile",
+        -1: "réservée",
+        0: "neutre",
+        1: "plutôt favorable",
+        2: "favorable",
+        3: "très favorable",
+    }[_bounded(value)]
 
 
 def qualitative_confidence(value: int) -> str:
