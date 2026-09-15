@@ -4,6 +4,16 @@ from dataclasses import dataclass, replace
 from enum import Enum
 from typing import Any, Mapping, Sequence
 
+from .beast import (
+    TypeFrenesie,
+    active_compulsion,
+    beast_result_can_trigger_compulsion,
+    clear_compulsion,
+    compulsion_pool_modifier,
+    compulsion_satisfied,
+    resoudre_frenesie,
+    trigger_clan_compulsion,
+)
 from .chronicle import PlayerCharacter
 from .consequences import DegreIssue, consequence_graduee
 from .dice import rouse_check
@@ -30,6 +40,7 @@ class OptionsResolution:
     depenser_volonte: bool = False
     coup_de_sang: bool = False
     utiliser_discipline: bool = False
+    chevaucher_vague_faim: bool = False
 
 
 @dataclass(frozen=True)
@@ -76,6 +87,14 @@ def _preparer_leviers(
     bonus = 0
     notes: list[str] = []
     personnage_prepare = character
+
+    compulsion = active_compulsion(character, profile)
+    compulsion_modifier = compulsion_pool_modifier(character, profile, situation, choice)
+    if compulsion_modifier:
+        bonus += compulsion_modifier
+        notes.append(
+            f"Compulsion — {compulsion.nom} : {compulsion_modifier} dés car cette approche ne satisfait pas l'impulsion de la Bête."
+        )
 
     if options.coup_de_sang:
         if character.hunger >= 5:
@@ -166,6 +185,141 @@ def _finaliser_leviers(
     )
 
 
+def _append_resolution_detail(
+    resolution: SituationResolution,
+    text: str,
+    *tags: str,
+    profile=None,
+    character=None,
+    simulation=None,
+) -> SituationResolution:
+    existing = resolution.outcome.detail.strip()
+    detail = " ".join(part for part in (existing, text.strip()) if part)
+    outcome = replace(
+        resolution.outcome,
+        detail=detail,
+        tags=tuple(sorted(set(resolution.outcome.tags + tuple(tags)))),
+        updated_character=character or resolution.outcome.updated_character,
+    )
+    return replace(
+        resolution,
+        profile=profile or resolution.profile,
+        simulation=simulation or resolution.simulation,
+        outcome=outcome,
+    )
+
+
+def _aggraver_domaine_apres_frenesie(simulation, situation: Situation):
+    if not situation.id.startswith("hunt_"):
+        return simulation
+    domain_id = situation.id.removeprefix("hunt_")
+    domain = simulation.domains.get(domain_id)
+    if domain is None:
+        return simulation
+    domains = dict(simulation.domains)
+    domains[domain_id] = replace(
+        domain,
+        masquerade_risk=min(3, domain.masquerade_risk + 1),
+        pressure=max(0, domain.pressure + 1),
+    )
+    return replace(simulation, domains=domains)
+
+
+def _appliquer_compulsion_bestiale(
+    character: PlayerCharacter,
+    resolution: SituationResolution,
+) -> SituationResolution:
+    current = active_compulsion(character, resolution.profile)
+    if current is not None:
+        if compulsion_satisfied(
+            character,
+            resolution.profile,
+            resolution.situation,
+            resolution.choice,
+            success=resolution.dice.success,
+        ):
+            profile = clear_compulsion(resolution.profile)
+            return _append_resolution_detail(
+                resolution,
+                f"Vous donnez à la Bête ce qu'elle exigeait : la Compulsion {current.nom} se dissipe.",
+                "compulsion_satisfaite",
+                profile=profile,
+            )
+        return resolution
+
+    if resolution.choice.effect in {"hunt", "hunt_social"}:
+        # La chasse possède sa conséquence bestiale spécifique : la Frénésie de Faim.
+        return resolution
+    if not beast_result_can_trigger_compulsion(resolution.dice):
+        return resolution
+
+    profile, definition = trigger_clan_compulsion(
+        character,
+        resolution.profile,
+        focus=resolution.situation.title,
+    )
+    return _append_resolution_detail(
+        resolution,
+        f"La Bête impose sa Compulsion de clan — {definition.nom}. {definition.description}",
+        f"compulsion:{definition.id}",
+        "bete",
+        profile=profile,
+    )
+
+
+def _appliquer_frenesie_faim_chasse(
+    character: PlayerCharacter,
+    resolution: SituationResolution,
+    *,
+    options: OptionsResolution,
+    step_nonce: str,
+) -> SituationResolution:
+    if resolution.choice.effect not in {"hunt", "hunt_social"}:
+        return resolution
+    if not resolution.dice.success or resolution.dice.hunger < 4:
+        return resolution
+
+    frenzy = resoudre_frenesie(
+        resolution.profile,
+        humanity=character.humanity,
+        clan_id=character.clan_id,
+        frenzy_type=TypeFrenesie.FAIM,
+        difficulty=3,
+        seed=(
+            f"{character.character_id}:{character.chapter}:{character.segment}:"
+            f"{character.local_night}:{resolution.situation.id}:{resolution.choice.id}:{step_nonce}:taste-blood"
+        ),
+        ride_wave=options.chevaucher_vague_faim,
+    )
+    if frenzy.resisted:
+        return _append_resolution_detail(
+            resolution,
+            "Le goût du sang réveille une Frénésie de Faim, mais vous contenez la Bête avant qu'elle ne prenne le contrôle.",
+            "frenesie_faim_resistee",
+        )
+
+    updated_character = replace(resolution.outcome.updated_character, hunger=1)
+    next_simulation = _aggraver_domaine_apres_frenesie(resolution.simulation, resolution.situation)
+    if frenzy.rode_wave:
+        text = (
+            "Vous choisissez de Chevaucher la vague : la Frénésie de Faim vous emporte. "
+            "Vous reprenez le contrôle à Faim 1, tandis que votre excès accroît la pression et le risque autour du Domaine."
+        )
+    else:
+        text = (
+            "Le goût du sang brise votre contrôle : la Frénésie de Faim vous pousse à continuer jusqu'à Faim 1. "
+            "Votre excès accroît la pression et le risque autour du Domaine."
+        )
+    return _append_resolution_detail(
+        resolution,
+        text,
+        "frenesie_faim",
+        "bete",
+        character=updated_character,
+        simulation=next_simulation,
+    )
+
+
 def _resolve_with_step_nonce(
     character: PlayerCharacter,
     profile,
@@ -220,6 +374,13 @@ def _resolve_with_step_nonce(
     resolution = replace(resolution, situation=situation, choice=canonical_choice)
     if canonical_choice.effect == "praxis_claim":
         resolution = apply_praxis_claim(resolution, character)
+    resolution = _appliquer_compulsion_bestiale(character, resolution)
+    resolution = _appliquer_frenesie_faim_chasse(
+        character,
+        resolution,
+        options=options,
+        step_nonce=step_nonce,
+    )
     return resolution
 
 
@@ -312,6 +473,8 @@ def _event_budget(character: PlayerCharacter, resolution: SituationResolution) -
     dice = resolution.dice
     effect = resolution.choice.effect
     degre = consequence_graduee(resolution.choice, dice).degre
+    if "frenesie_faim" in resolution.outcome.tags:
+        return 0, "La Frénésie de Faim consume le reste de cette Nuit significative."
     if effect == "sire_refuse" and not dice.success:
         memory = memory_for(resolution.simulation, resolution.situation.source_actor_id, character)
         severe = resolution.outcome.updated_character.sire_relation <= 1 or (
@@ -398,7 +561,10 @@ def resolve_free_action(
     cost = remaining_actions if situation.id.startswith("hunt_") and choice_id == "careful_hunt" else 1
     left = max(0, remaining_actions - cost)
     degre = consequence_graduee(resolution.choice, resolution.dice).degre
-    if degre == DegreIssue.ECHEC_GRAVE:
+    if "frenesie_faim" in resolution.outcome.tags:
+        left = 0
+        consequence = "La Frénésie de Faim consume tout le temps qui restait avant l'aube."
+    elif degre == DegreIssue.ECHEC_GRAVE:
         left = 0
         consequence = "La gravité de l'échec transforme la situation en complication et consume le reste de la nuit."
     elif degre == DegreIssue.ECHEC_SERIEUX:
@@ -436,6 +602,8 @@ def log_entry(kind: str, result: NightStepResult) -> dict[str, Any]:
         "difficulty": r.dice.difficulty,
         "degre_issue": consequence_graduee(r.choice, r.dice).degre.value,
         "relances_volonte": r.dice.relances_volonte,
+        "compulsion": r.profile.current_compulsion,
+        "frenesie_faim": "frenesie_faim" in r.outcome.tags,
         "remaining_actions_after": result.remaining_actions,
         "consequence": result.consequence,
     }
