@@ -8,12 +8,7 @@ from .chronicle import ChronicleProgress, NightOutcome, PlayerCharacter
 
 
 class ChronicleStore:
-    """Persistence adapter for the player-centric chronicle.
-
-    The legacy clan repository remains untouched. This adapter deliberately lives
-    beside it so the migration can be rolled back without rewriting the political
-    engine. SQLite creates its local tables lazily; Supabase uses the V0.21 schema.
-    """
+    """Persistence for the player-centric chronicle, isolated from the legacy clan loop."""
 
     def __init__(self, repository: Any):
         self.repository = getattr(repository, "delegate", repository)
@@ -64,6 +59,9 @@ class ChronicleStore:
                     starting_discipline TEXT NOT NULL,
                     mortal_stance TEXT NOT NULL,
                     order_stance TEXT NOT NULL,
+                    experience INTEGER NOT NULL DEFAULT 0,
+                    office TEXT NOT NULL DEFAULT 'none',
+                    lineage_parent_id TEXT,
                     ready_for_convergence INTEGER NOT NULL DEFAULT 0,
                     is_active INTEGER NOT NULL DEFAULT 1,
                     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -89,6 +87,18 @@ class ChronicleStore:
                 );
                 """
             )
+            columns = {
+                row["name"]
+                for row in con.execute("PRAGMA table_info(wod_player_characters)").fetchall()
+            }
+            migrations = {
+                "experience": "ALTER TABLE wod_player_characters ADD COLUMN experience INTEGER NOT NULL DEFAULT 0",
+                "office": "ALTER TABLE wod_player_characters ADD COLUMN office TEXT NOT NULL DEFAULT 'none'",
+                "lineage_parent_id": "ALTER TABLE wod_player_characters ADD COLUMN lineage_parent_id TEXT",
+            }
+            for column, statement in migrations.items():
+                if column not in columns:
+                    con.execute(statement)
 
     @staticmethod
     def _progress_from_row(row: dict[str, Any]) -> ChronicleProgress:
@@ -131,6 +141,13 @@ class ChronicleStore:
             starting_discipline=str(row["starting_discipline"]),
             mortal_stance=str(row["mortal_stance"]),
             order_stance=str(row["order_stance"]),
+            experience=int(row.get("experience", 0)),
+            office=str(row.get("office", "none")),
+            lineage_parent_id=(
+                str(row["lineage_parent_id"])
+                if row.get("lineage_parent_id") is not None
+                else None
+            ),
             ready_for_convergence=bool(row["ready_for_convergence"]),
             is_active=bool(row["is_active"]),
         )
@@ -334,14 +351,13 @@ class ChronicleStore:
 
     def list_history(self, game_id: str, character_id: str, limit: int = 30) -> list[dict[str, Any]]:
         if self._is_supabase:
-            rows = self.repository.client.select(
+            return self.repository.client.select(
                 "wod_character_night_history",
                 "chapter,segment,night_number,action,outcome_json,created_at",
                 filters={"game_id": game_id, "character_id": character_id},
                 limit=limit,
                 order="created_at.desc",
             )
-            return rows
         with self.repository._connect() as con:
             rows = con.execute(
                 """
@@ -353,7 +369,7 @@ class ChronicleStore:
                 """,
                 (game_id, character_id, limit),
             ).fetchall()
-        result = []
+        result: list[dict[str, Any]] = []
         for row in rows:
             item = dict(row)
             item["outcome_json"] = json.loads(item["outcome_json"])
@@ -401,7 +417,8 @@ class ChronicleStore:
             if not rows or any(not bool(row["ready_for_convergence"]) for row in rows):
                 raise ValueError("All active characters must be ready for the convergence")
 
-            if progress.segment >= progress.segments_per_chapter:
+            final_segment = progress.segment >= progress.segments_per_chapter
+            if final_segment:
                 next_progress = ChronicleProgress(
                     game_id=game_id,
                     year=progress.year + progress.ellipse_years,
@@ -411,7 +428,6 @@ class ChronicleStore:
                     segments_per_chapter=progress.segments_per_chapter,
                     ellipse_years=progress.ellipse_years,
                 )
-                reset_goal = True
             else:
                 next_progress = ChronicleProgress(
                     game_id=game_id,
@@ -422,7 +438,6 @@ class ChronicleStore:
                     segments_per_chapter=progress.segments_per_chapter,
                     ellipse_years=progress.ellipse_years,
                 )
-                reset_goal = False
 
             con.execute(
                 """
@@ -442,6 +457,16 @@ class ChronicleStore:
                 UPDATE wod_player_characters
                 SET chronicle_year = ?, chapter = ?, segment = ?, local_night = 1,
                     ready_for_convergence = 0,
+                    experience = experience + CASE
+                        WHEN ? AND goal_progress >= 5 THEN 2
+                        WHEN ? AND goal_progress >= 2 THEN 1 ELSE 0 END,
+                    personal_influence = personal_influence + CASE
+                        WHEN ? AND goal_progress >= 5 THEN 1.0
+                        WHEN ? AND goal_progress >= 2 THEN 0.5 ELSE 0 END,
+                    reputation = MIN(3, reputation + CASE
+                        WHEN ? AND goal_progress >= 5 THEN 1 ELSE 0 END),
+                    status = MIN(5, status + CASE
+                        WHEN ? AND goal_progress >= 7 AND status = 0 THEN 1 ELSE 0 END),
                     goal_progress = CASE WHEN ? THEN 0 ELSE goal_progress END,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE game_id = ? AND is_active = 1
@@ -450,7 +475,13 @@ class ChronicleStore:
                     next_progress.year,
                     next_progress.chapter,
                     next_progress.segment,
-                    int(reset_goal),
+                    int(final_segment),
+                    int(final_segment),
+                    int(final_segment),
+                    int(final_segment),
+                    int(final_segment),
+                    int(final_segment),
+                    int(final_segment),
                     game_id,
                 ),
             )
