@@ -2,7 +2,7 @@
 
 Ce document suit la **couverture du corpus**, pas seulement les faits déjà utilisés par le moteur.
 
-Objectif : éviter qu'une page, une période ou une contradiction importante soit oubliée lors du développement de la Chronique.
+Objectif : éviter qu'une page, une période, une famille de données ou une contradiction importante soit oubliée lors du développement de la Chronique.
 
 ## Règles
 
@@ -14,8 +14,9 @@ Objectif : éviter qu'une page, une période ou une contradiction importante soi
 6. **Les pages modernes sont bloquées pour 1435** tant qu'une continuité historique n'est pas explicitement établie.
 7. **Un acteur incertain n'est pas injecté** dans la simulation comme une certitude.
 8. Le wiki est une source de continuité et d'indexation ; il n'est jamais recopié intégralement dans le dépôt.
+9. **Une famille de données importante doit rester visible même si aucune page n'est encore complètement auditée.**
 
-## États d'audit
+## États d'audit des sources
 
 | État | Sens |
 |---|---|
@@ -24,28 +25,59 @@ Objectif : éviter qu'une page, une période ou une contradiction importante soi
 | `indexed` | page connue et enregistrée, audit détaillé restant à faire |
 | `linked_unverified` | ressource repérée par les index/liens du site, contenu à vérifier explicitement |
 
-Le registre machine est `game/lore_catalog.py`.
+Le registre machine des sources est `game/lore_catalog.py`.
 
-## Couverture fonctionnelle
+## Contrat de couverture V0.47d
 
-Le corpus doit couvrir progressivement les catégories suivantes :
+Paris by Night possède un sommaire maître, **Paris Vampire**, qui expose beaucoup plus que des fiches de PNJ : histoire, clans, Anarchs/Sabbat, institutions, Cour, Domaines, coteries, secrets, autres créatures et une série de notes de campagne (lignées, chronologies, présence des PNJ, Prestations, liens de Sang, influences, incidents, cartes, soleil, etc.).
 
-- histoire et chronologie ;
+Le site indique lui-même dans sa liste de tâches que plusieurs de ces ensembles sont encore incomplets. WoD-rpg ne doit donc jamais assimiler « indexé dans Paris by Night » à « canon complet et vérifié ».
+
+`game/paris_coverage.py` transforme ce sommaire en **contrat de couverture obligatoire**. Chaque famille possède :
+
+- un identifiant stable ;
+- un ou plusieurs ancrages de source ;
+- une priorité spécifique pour 1435 ;
+- un état de couverture `structured`, `partial`, `indexed` ou `missing` ;
+- la partie du moteur qu'elle doit alimenter ;
+- un garde-fou lorsque les données disponibles sont surtout modernes.
+
+La CI verrouille la liste des familles obligatoires. Supprimer accidentellement, par exemple, les **liens de Sang**, la **chronologie de présence des PNJ** ou les **puissances extérieures** devient un échec de test.
+
+### Familles obligatoires
+
+Le contrat suit actuellement :
+
+- histoire générale et chronologie vampirique ;
+- contexte et chronologie mortels ;
 - personnages ;
 - lignées ;
-- clans et lignages ;
-- présence/localisation par période ;
-- factions, salons et coteries ;
-- offices et pouvoir ;
-- relations ;
+- clans et groupes de sang ;
+- présence/localisation/torpeur/disparition ;
+- Anarchs et contre-pouvoirs ;
+- Sabbat et héritages associés ;
+- naissance de la Camarilla ;
+- offices et exercice du pouvoir ;
+- Praxis et succession ;
+- factions, coteries et salons ;
+- alliances, rivalités et patronages ;
 - Prestations et dettes ;
 - liens de Sang ;
 - influences mortelles ;
-- Domaines, refuges et lieux ;
-- secrets, rumeurs et niveaux de connaissance ;
-- événements et crises ;
-- autres créatures surnaturelles ;
-- contexte mortel de Paris.
+- Domaines, fiefs et droits de chasse ;
+- géographie historique et lieux ;
+- Cour, Elysium et usages ;
+- secrets, rumeurs et désinformation ;
+- événements, incidents et crises ;
+- puissances extérieures ;
+- autres créatures du Monde des Ténèbres ;
+- chronologies individuelles ;
+- chronologies des offices ;
+- chronologie de présence des PNJ ;
+- soleil, saisons et contraintes calendaires ;
+- amorces et matière de scénario.
+
+`structured` ne signifie pas « toutes les données historiques sont connues ». Cela signifie que **le moteur sait déjà où cette famille doit vivre et qu'un premier corpus utilisable existe**. `partial` et `indexed` sont volontairement conservés tant que l'audit n'est pas suffisant.
 
 ## Photographie de départ : Paris 1435
 
@@ -124,6 +156,7 @@ Les ressources suivantes sont utiles pour la mécanique future mais ne doivent p
 - liste moderne des influences ;
 - salons/coteries modernes ;
 - organisation moderne du pouvoir ;
+- Bourgmestres et Bourgs modernes ;
 - Archontes ;
 - secrets et idées de scénarios modernes.
 
@@ -139,7 +172,8 @@ Elles peuvent inspirer des **types de données** ou servir lorsque la Chronique 
 - recenser les Nosferatus, Malkaviens et Gangrels réellement présents ;
 - recenser les puissances extérieures actives sur Paris : Angleterre/Mithras, Bourgogne, Orléans, Normandie, Bourges ;
 - consolider les lieux/refuges/fiefs réellement valides au XVe siècle ;
-- recenser les relations et Prestations explicitement attestées à cette date.
+- recenser les relations, Prestations et éventuels liens de Sang explicitement attestés à cette date ;
+- exploiter la chronologie de présence des PNJ pour sécuriser les futures ellipses.
 
 ### Priorité 2 — chronologie longue
 
@@ -163,15 +197,18 @@ Elles peuvent inspirer des **types de données** ou servir lorsque la Chronique 
 
 ## Sortie QA
 
-`scripts/lore_audit_report.py` produit un rapport JSON indiquant notamment :
+`scripts/lore_audit_report.py` produit désormais un rapport JSON de schéma V2 indiquant notamment :
 
 - nombre de sources cataloguées ;
 - nombre audité / partiel / indexé / non vérifié ;
 - couverture pertinente pour 1435 ;
+- **nombre de familles de données obligatoires** ;
+- nombre de familles `structured`, `partial`, `indexed` et `missing` ;
+- **liste nominative des familles prioritaires 1435 encore incomplètes** ;
 - nombre d'entités et de faits ;
 - contradictions ouvertes ;
 - présences confirmées ou externes ;
 - présences encore non vérifiées ;
 - factions structurées.
 
-Ce rapport est destiné à être exécuté dans la CI : **une zone non auditée reste visible au lieu de disparaître dans les notes de développement**.
+Ce rapport est exécuté dans la CI : **une zone non auditée reste visible au lieu de disparaître dans les notes de développement**, et une famille importante ne peut plus être supprimée silencieusement du périmètre.
