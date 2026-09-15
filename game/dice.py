@@ -13,12 +13,7 @@ DIFFICULTY_BANDS: tuple[tuple[int, int | None, str, str], ...] = (
 
 
 def difficulty_band(difficulty: int) -> str:
-    """Return the player-facing difficulty band without exposing the target number.
-
-    WoD-rpg keeps the exact target inside the engine. The UI only exposes a
-    coarse estimate: 2-3 standard, 4-5 difficult, 6+ extreme. Difficulty 1 is
-    treated as easy for completeness.
-    """
+    """Return the player-facing difficulty band without exposing the target number."""
 
     if difficulty < 1:
         raise ValueError("Difficulty must be positive")
@@ -50,6 +45,7 @@ class DiceResult:
     critical: bool
     messy_critical: bool
     bestial_failure: bool
+    relances_volonte: int = 0
 
     @property
     def success(self) -> bool:
@@ -71,18 +67,28 @@ def _die(seed: str, index: int) -> int:
     return digest[0] % 10 + 1
 
 
-def roll_pool(*, pool: int, hunger: int, difficulty: int, seed: str) -> DiceResult:
-    if pool < 1:
-        pool = 1
-    if difficulty < 1:
-        raise ValueError("Difficulty must be positive")
-    hunger = max(0, min(5, hunger))
-    hunger_count = min(pool, hunger)
-    normal_count = pool - hunger_count
-    normal = tuple(_die(seed + ":normal", index) for index in range(normal_count))
-    hungry = tuple(_die(seed + ":hunger", index) for index in range(hunger_count))
-    all_dice = normal + hungry
+def _relancer_par_volonte(normal: tuple[int, ...], seed: str) -> tuple[tuple[int, ...], int]:
+    """Relance jusqu'à trois dés ordinaires en échec, jamais les dés de Faim."""
 
+    indices = tuple(index for index, value in enumerate(normal) if value < 6)[:3]
+    if not indices:
+        return normal, 0
+    updated = list(normal)
+    for rang, index in enumerate(indices):
+        updated[index] = _die(seed + ":volonte", rang)
+    return tuple(updated), len(indices)
+
+
+def _resultat_des(
+    *,
+    pool: int,
+    difficulty: int,
+    hunger_count: int,
+    normal: tuple[int, ...],
+    hungry: tuple[int, ...],
+    relances_volonte: int = 0,
+) -> DiceResult:
+    all_dice = normal + hungry
     base_successes = sum(1 for value in all_dice if value >= 6)
     tens = sum(1 for value in all_dice if value == 10)
     critical_pairs = tens // 2
@@ -102,6 +108,34 @@ def roll_pool(*, pool: int, hunger: int, difficulty: int, seed: str) -> DiceResu
         critical=critical,
         messy_critical=messy,
         bestial_failure=bestial,
+        relances_volonte=relances_volonte,
+    )
+
+
+def roll_pool(*, pool: int, hunger: int, difficulty: int, seed: str) -> DiceResult:
+    if pool < 1:
+        pool = 1
+    if difficulty < 1:
+        raise ValueError("Difficulty must be positive")
+    hunger = max(0, min(5, hunger))
+    hunger_count = min(pool, hunger)
+    normal_count = pool - hunger_count
+
+    utiliser_volonte = "@volonte" in seed
+    base_seed = seed.replace("@volonte", "")
+    normal = tuple(_die(base_seed + ":normal", index) for index in range(normal_count))
+    hungry = tuple(_die(base_seed + ":hunger", index) for index in range(hunger_count))
+    relances = 0
+    if utiliser_volonte:
+        normal, relances = _relancer_par_volonte(normal, base_seed)
+
+    return _resultat_des(
+        pool=pool,
+        difficulty=difficulty,
+        hunger_count=hunger_count,
+        normal=normal,
+        hungry=hungry,
+        relances_volonte=relances,
     )
 
 
