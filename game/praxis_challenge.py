@@ -61,7 +61,11 @@ def resolve_praxis_challenge(
     state: GameState,
     executed_actions: list[GameAction],
     rules: GameRules = DEFAULT_RULES,
+    *,
+    reference_state: GameState | None = None,
 ) -> tuple[PraxisChallengeResolution | None, list[GameEvent]]:
+    """Résout la coalition sur un état de référence, applique les effets sur ``state``."""
+
     if not 0 <= rules.praxis_challenge_threshold < 1:
         raise ValueError("praxis_challenge_threshold must be between 0 and 1")
     if rules.praxis_challenge_min_primogens < 1:
@@ -74,17 +78,21 @@ def resolve_praxis_challenge(
     ]
     if not challenge_actions:
         return None, []
-    if state.prince_id is None:
+
+    reference = reference_state or state
+    if reference.prince_id is None or state.prince_id is None:
         raise ValueError("No recognized Prince can be challenged")
+    if reference.prince_id != state.prince_id:
+        raise ValueError("Praxis changed before challenge resolution")
 
     challenger_by_primogen: dict[str, str] = {}
     for action in challenge_actions:
-        primogen_id = validate_praxis_challenge_action(state, action)
+        primogen_id = validate_praxis_challenge_action(reference, action)
         challenger_by_primogen[primogen_id] = action.clan_id
 
-    stances = determine_faction_stances(state)
+    stances = determine_faction_stances(reference)
     weights, _ = primogen_political_weights(
-        state,
+        reference,
         stances,
         rules.opposition_transfer_ratio,
     )
