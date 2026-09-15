@@ -6,6 +6,7 @@ from typing import Mapping, Sequence
 from .chronicle import PersonalAction, PlayerCharacter
 from .chronicle_simulation import SimulationState
 from .narrative_state import IntelligenceState, StoryHookState, reliability_label
+from .praxis import assess_praxis_pressure
 from .situations import Situation, SituationChoice
 
 
@@ -22,6 +23,8 @@ def _source_for_category(category: str) -> tuple[str, str]:
         return "Des serviteurs mortels et des rumeurs de rue", "mortal_rumor"
     if category == "historical_milestone":
         return "Des voyageurs et des nouvelles venues de l'extérieur", "travellers"
+    if category == "praxis_pressure":
+        return "Des conversations recoupées dans plusieurs cercles de la Cour", "court_gossip"
     return "Des voix concordantes dans la nuit parisienne", "rumor"
 
 
@@ -54,7 +57,6 @@ def intelligence_from_world_event(event: Mapping) -> IntelligenceState:
 
 def hook_from_world_event(event: Mapping, intelligence: IntelligenceState) -> StoryHookState:
     category = str(event.get("category", "world_event"))
-    actor_name = str(event.get("actor_name", "Un acteur de la nuit"))
     title = "Un mouvement dans la nuit parisienne"
     stakes = "Comprendre ce mouvement peut éviter d'être utilisé par d'autres Caïnites."
     tags: tuple[str, ...] = ("politics", "information")
@@ -90,6 +92,13 @@ def hook_from_world_event(event: Mapping, intelligence: IntelligenceState) -> St
         stakes = "Les bouleversements mortels et caïnites créent de nouveaux rapports de force que personne ne contrôle complètement."
         tags = ("history", "politics", "information")
         urgency = 2
+    elif category == "praxis_pressure":
+        title = "La Praxis vacille"
+        stakes = (
+            "Une succession prématurée peut fracturer la Cour, mais soutenir une autorité affaiblie peut être tout aussi coûteux."
+        )
+        tags = ("politics", "praxis", "information")
+        urgency = 3
 
     return StoryHookState(
         id=f"hook_{event.get('id', 'world_event')}",
@@ -141,6 +150,81 @@ def _assigned_night(event_id: str, nights_per_cycle: int) -> int:
     return 1 + _deterministic_score(f"night:{event_id}", nights)
 
 
+def _choices_for_hook(
+    hook: StoryHookState,
+    intelligence: IntelligenceState,
+    character: PlayerCharacter,
+    simulation: SimulationState,
+) -> tuple[SituationChoice, ...]:
+    difficulty = max(2, 4 - intelligence.reliability)
+    verify = SituationChoice(
+        "verify",
+        "Vérifier avant de choisir un camp",
+        "Recouper les témoins, les silences et les incohérences sans annoncer vos conclusions.",
+        "wits",
+        "insight",
+        difficulty,
+        PersonalAction.INVESTIGATE,
+        "political_intel",
+    )
+    distance = SituationChoice(
+        "distance",
+        "Rester en retrait et observer",
+        "Vous refusez d'être enrôlé immédiatement tout en surveillant les conséquences.",
+        "composure",
+        "etiquette",
+        2,
+        PersonalAction.INVESTIGATE,
+        "cautious_distance",
+    )
+
+    if hook.category == "praxis_pressure":
+        choices: list[SituationChoice] = [verify]
+        choices.append(
+            SituationChoice(
+                "support_praxis",
+                "Soutenir publiquement la Praxis en place",
+                "Vous faites de votre soutien un acte politique visible, avec les alliances et inimitiés que cela implique.",
+                "charisma",
+                "politics",
+                3,
+                PersonalAction.ELYSIUM,
+                "political_voice",
+            )
+        )
+        pressure = assess_praxis_pressure(simulation, (character,))
+        if pressure.is_critical and character.character_id in pressure.player_candidate_ids:
+            choices.append(
+                SituationChoice(
+                    "claim_praxis",
+                    "Faire connaître votre propre prétention",
+                    "Vous ne demandez pas une promotion : vous affirmez que votre pouvoir peut remplacer celui du Prince.",
+                    "charisma",
+                    "politics",
+                    5,
+                    PersonalAction.ELYSIUM,
+                    "praxis_claim",
+                )
+            )
+        choices.append(distance)
+        return tuple(choices)
+
+    return (
+        verify,
+        SituationChoice(
+            "approach",
+            "Approcher l'acteur concerné",
+            "Vous transformez une rumeur en relation politique, au risque de révéler votre intérêt.",
+            "charisma",
+            "persuasion",
+            3,
+            PersonalAction.BUILD_RELATION,
+            "political_voice",
+        ),
+        distance,
+    )
+
+
 def world_event_situations(
     character: PlayerCharacter,
     simulation: SimulationState,
@@ -166,7 +250,6 @@ def world_event_situations(
         hook = hook_from_world_event(event, intelligence)
         actor_id = str(event.get("actor_id", ""))
         source_actor_id = actor_id if actor_id in simulation.npcs else None
-        difficulty = max(2, 4 - intelligence.reliability)
         body = (
             f"{hook.premise} {hook.stakes} "
             f"Source : {intelligence.source_label} — {reliability_label(intelligence.reliability)}. "
@@ -181,38 +264,7 @@ def world_event_situations(
                     body=body,
                     source_actor_id=source_actor_id,
                     tags=hook.tags,
-                    choices=(
-                        SituationChoice(
-                            "verify",
-                            "Vérifier avant de choisir un camp",
-                            "Recouper les témoins, les silences et les incohérences sans annoncer vos conclusions.",
-                            "wits",
-                            "insight",
-                            difficulty,
-                            PersonalAction.INVESTIGATE,
-                            "political_intel",
-                        ),
-                        SituationChoice(
-                            "approach",
-                            "Approcher l'acteur concerné",
-                            "Vous transformez une rumeur en relation politique, au risque de révéler votre intérêt.",
-                            "charisma",
-                            "persuasion",
-                            3,
-                            PersonalAction.BUILD_RELATION,
-                            "political_voice",
-                        ),
-                        SituationChoice(
-                            "distance",
-                            "Rester en retrait et observer",
-                            "Vous refusez d'être enrôlé immédiatement tout en surveillant les conséquences.",
-                            "composure",
-                            "etiquette",
-                            2,
-                            PersonalAction.INVESTIGATE,
-                            "cautious_distance",
-                        ),
-                    ),
+                    choices=_choices_for_hook(hook, intelligence, character, simulation),
                 ),
             )
         )

@@ -5,6 +5,7 @@ from enum import Enum
 from typing import Any, Mapping, Sequence
 
 from .chronicle import PlayerCharacter
+from .praxis import apply_praxis_claim
 from .relationship_memory import memory_for
 from .situations import Situation, SituationResolution, generate_situations, resolve_situation
 from .world_situations import world_event_situations
@@ -90,7 +91,10 @@ def _resolve_with_step_nonce(
         nights_per_segment=nights_per_segment,
         free_intent=free_intent,
     )
-    return replace(resolution, situation=situation, choice=canonical_choice)
+    resolution = replace(resolution, situation=situation, choice=canonical_choice)
+    if canonical_choice.effect == "praxis_claim":
+        resolution = apply_praxis_claim(resolution, character)
+    return resolution
 
 
 def available_situations(

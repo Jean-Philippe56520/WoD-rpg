@@ -16,6 +16,7 @@ from .chronicle_simulation import (
 )
 from .era import CamarillaStage, EraRules, era_for_year
 from .paris_lore import PARIS_1435_NPCS, ParisNpcSeed
+from .praxis import praxis_pressure_beat
 
 
 LEGACY_EXTRA_IDS = {
@@ -385,4 +386,9 @@ def advance_paris_simulation(
             )
         )
 
-    return replace(current, domains=domains), tuple(beats)
+    current = replace(current, domains=domains)
+    praxis_beat = praxis_pressure_beat(current, characters)
+    if praxis_beat is not None:
+        beats.append(praxis_beat)
+
+    return current, tuple(beats)
