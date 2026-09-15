@@ -14,6 +14,7 @@ from .chronicle import (
 from .chronicle_politics import validate_political_state
 from .chronicle_simulation_store import ChronicleSimulationStore
 from .chronicle_store import ChronicleStore
+from .chronicle_world_store import ChronicleWorldStore
 from .era import era_for_year
 from .models import GameState
 from .vampire_profile_store import VampireProfileStore
@@ -84,7 +85,13 @@ def _copy_history(repository: Any, source_game_id: str, target_game_id: str, cha
             )
 
 
-def _copy_world_events(repository: Any, source_game_id: str, target_game_id: str) -> None:
+def _copy_world_events(
+    repository: Any,
+    source_game_id: str,
+    target_game_id: str,
+    *,
+    excluded_actor_ids: set[str],
+) -> None:
     base = getattr(repository, "delegate", repository)
     if hasattr(base, "client"):
         rows = base.client.select(
@@ -95,6 +102,8 @@ def _copy_world_events(repository: Any, source_game_id: str, target_game_id: str
             limit=1000,
         )
         for row in rows:
+            if str(row["actor_id"]) in excluded_actor_ids:
+                continue
             payload = dict(row)
             payload["id"] = f"world_{uuid.uuid4().hex}"
             payload["game_id"] = target_game_id
@@ -113,6 +122,8 @@ def _copy_world_events(repository: Any, source_game_id: str, target_game_id: str
         ).fetchall()
         for row in rows:
             item = dict(row)
+            if str(item["actor_id"]) in excluded_actor_ids:
+                continue
             con.execute(
                 """
                 INSERT INTO wod_chronicle_world_events(
@@ -132,6 +143,59 @@ def _copy_world_events(repository: Any, source_game_id: str, target_game_id: str
                     item["hidden_intent"],
                 ),
             )
+
+
+def _personalize_legacy_simulation(
+    simulation,
+    *,
+    game_id: str,
+    excluded_character_ids: set[str],
+):
+    domains = {
+        domain_id: (
+            replace(domain, holder_id=None)
+            if domain.holder_id in excluded_character_ids
+            else domain
+        )
+        for domain_id, domain in simulation.domains.items()
+    }
+    hunting_rights = {
+        right_id: right
+        for right_id, right in simulation.hunting_rights.items()
+        if right.beneficiary_id not in excluded_character_ids
+        and right.granted_by_id not in excluded_character_ids
+    }
+    boons = {
+        boon_id: boon
+        for boon_id, boon in simulation.boons.items()
+        if boon.creditor_id not in excluded_character_ids
+        and boon.debtor_id not in excluded_character_ids
+    }
+    offices = {
+        slot: holder_id
+        for slot, holder_id in simulation.offices.items()
+        if holder_id not in excluded_character_ids
+    }
+    npcs = {
+        npc_id: replace(
+            npc,
+            relations={
+                actor_id: score
+                for actor_id, score in npc.relations.items()
+                if actor_id not in excluded_character_ids
+            },
+        )
+        for npc_id, npc in simulation.npcs.items()
+    }
+    return replace(
+        simulation,
+        game_id=game_id,
+        npcs=npcs,
+        domains=domains,
+        hunting_rights=hunting_rights,
+        boons=boons,
+        offices=offices,
+    )
 
 
 def ensure_personal_chronicle(
@@ -157,6 +221,8 @@ def ensure_personal_chronicle(
     store = ChronicleStore(repository)
     profile_store = VampireProfileStore(repository)
     simulation_store = ChronicleSimulationStore(repository)
+    # Ensures the event table exists for SQLite before a possible legacy copy.
+    ChronicleWorldStore(repository)
 
     existing_characters = store.list_characters(game_id)
     foreign_characters = [item for item in existing_characters if item.player_id != player_id]
@@ -165,8 +231,11 @@ def ensure_personal_chronicle(
 
     target_character = store.get_character(game_id, player_id)
     legacy_character = None
+    legacy_characters = []
     if target_character is None:
         legacy_character = store.get_character(CHRONICLE_GAME_ID, player_id)
+        if legacy_character is not None:
+            legacy_characters = store.list_characters(CHRONICLE_GAME_ID)
 
     target_progress = store.get_progress(game_id)
     if target_progress is None:
@@ -186,25 +255,31 @@ def ensure_personal_chronicle(
     if legacy_profile is not None:
         profile_store.save(replace(legacy_profile, game_id=game_id))
 
+    other_character_ids = {
+        item.character_id
+        for item in legacy_characters
+        if item.character_id != legacy_character.character_id
+    }
     _copy_history(repository, CHRONICLE_GAME_ID, game_id, legacy_character.character_id)
-    _copy_world_events(repository, CHRONICLE_GAME_ID, game_id)
+    _copy_world_events(
+        repository,
+        CHRONICLE_GAME_ID,
+        game_id,
+        excluded_actor_ids=other_character_ids,
+    )
 
     legacy_simulation = simulation_store.get(CHRONICLE_GAME_ID)
     if legacy_simulation is not None:
-        candidate = replace(legacy_simulation, game_id=game_id)
-        try:
-            validate_political_state(
-                candidate,
-                [migrated_character],
-                era_for_year(target_progress.year),
-            )
-        except ValueError:
-            # A shared legacy world may reference another player's character.
-            # In that case keep the migrated character/history and rebuild a
-            # clean private simulation on first use rather than importing a
-            # politically inconsistent state.
-            pass
-        else:
-            simulation_store.save(candidate)
+        candidate = _personalize_legacy_simulation(
+            legacy_simulation,
+            game_id=game_id,
+            excluded_character_ids=other_character_ids,
+        )
+        validate_political_state(
+            candidate,
+            [migrated_character],
+            era_for_year(target_progress.year),
+        )
+        simulation_store.save(candidate)
 
     return PersonalChronicleContext(game_id=game_id, migrated_legacy=True)
