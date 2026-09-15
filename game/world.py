@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from .ideology import initialize_current_politics
+from .coteries import initialize_coteries
 from .models import (
     AxisPolarity,
     BloodRank,
@@ -8,6 +8,7 @@ from .models import (
     Character,
     Clan,
     ClanPoliticalState,
+    CoterieSide,
     GameState,
 )
 
@@ -25,7 +26,7 @@ def seed_characters() -> dict[str, Character]:
             disciplines={"domination": 2, "force_d_ame": 1, "presence": 2},
             blood_rank=BloodRank.ANCILLA,
             backgrounds={"Influence politique": 2, "Ressources": 2, "Contacts": 1},
-            loyalty=75, ambition=85, is_primogen=True,
+            relation_to_primogen=2, loyalty=75, ambition=85, is_primogen=True,
         ),
         "ventrue_claire": Character(
             id="ventrue_claire", name="Claire Beaumont", clan_id="ventrue",
@@ -35,7 +36,7 @@ def seed_characters() -> dict[str, Character]:
             disciplines={"domination": 1, "presence": 2},
             blood_rank=BloodRank.NEWBORN,
             backgrounds={"Contacts": 2, "Influence politique": 1},
-            loyalty=30, ambition=80,
+            relation_to_primogen=0, loyalty=30, ambition=80,
         ),
         "ventrue_victor": Character(
             id="ventrue_victor", name="Victor de Keravel", clan_id="ventrue",
@@ -45,7 +46,7 @@ def seed_characters() -> dict[str, Character]:
             disciplines={"domination": 1, "force_d_ame": 2, "presence": 1},
             blood_rank=BloodRank.ANCILLA,
             backgrounds={"Ressources": 1, "Serviteurs": 1},
-            loyalty=75, ambition=65,
+            relation_to_primogen=2, loyalty=75, ambition=65,
         ),
         "ventrue_helene": Character(
             id="ventrue_helene", name="Helene Beaumont", clan_id="ventrue",
@@ -55,7 +56,7 @@ def seed_characters() -> dict[str, Character]:
             disciplines={"domination": 1, "presence": 1},
             blood_rank=BloodRank.NEWBORN,
             backgrounds={"Ressources": 2, "Contacts": 1},
-            loyalty=45, ambition=55,
+            relation_to_primogen=1, loyalty=45, ambition=55,
         ),
         "primogen_toreador": Character(
             id="primogen_toreador", name="Elise Valmont", clan_id="toreador",
@@ -65,7 +66,7 @@ def seed_characters() -> dict[str, Character]:
             disciplines={"auspex": 2, "celerite": 1, "presence": 2},
             blood_rank=BloodRank.ANCILLA,
             backgrounds={"Milieu artistique": 2, "Influence politique": 1, "Contacts": 2},
-            loyalty=70, ambition=80, is_primogen=True,
+            relation_to_primogen=2, loyalty=70, ambition=80, is_primogen=True,
         ),
         "toreador_lucien": Character(
             id="toreador_lucien", name="Lucien Marceau", clan_id="toreador",
@@ -75,7 +76,7 @@ def seed_characters() -> dict[str, Character]:
             disciplines={"celerite": 1, "presence": 2},
             blood_rank=BloodRank.NEWBORN,
             backgrounds={"Célébrité": 2, "Contacts": 1},
-            loyalty=40, ambition=78,
+            relation_to_primogen=1, loyalty=40, ambition=78,
         ),
         "toreador_camille": Character(
             id="toreador_camille", name="Camille Vernier", clan_id="toreador",
@@ -85,7 +86,7 @@ def seed_characters() -> dict[str, Character]:
             disciplines={"auspex": 2, "celerite": 1},
             blood_rank=BloodRank.ANCILLA,
             backgrounds={"Contacts": 2, "Ressources": 1},
-            loyalty=72, ambition=62,
+            relation_to_primogen=2, loyalty=72, ambition=62,
         ),
         "toreador_gabriel": Character(
             id="toreador_gabriel", name="Gabriel Sorel", clan_id="toreador",
@@ -95,7 +96,7 @@ def seed_characters() -> dict[str, Character]:
             disciplines={"celerite": 2, "presence": 1},
             blood_rank=BloodRank.NEWBORN,
             backgrounds={"Rue": 1},
-            loyalty=48, ambition=58,
+            relation_to_primogen=1, loyalty=48, ambition=58,
         ),
         "toreador_noemie": Character(
             id="toreador_noemie", name="Noemie Varenne", clan_id="toreador",
@@ -105,7 +106,7 @@ def seed_characters() -> dict[str, Character]:
             disciplines={"auspex": 2, "presence": 1},
             blood_rank=BloodRank.NEWBORN,
             backgrounds={"Contacts": 1},
-            loyalty=52, ambition=61,
+            relation_to_primogen=1, loyalty=52, ambition=61,
         ),
         "primogen_brujah": Character(
             id="primogen_brujah", name="Marcus Le Guen", clan_id="brujah",
@@ -115,7 +116,7 @@ def seed_characters() -> dict[str, Character]:
             disciplines={"celerite": 1, "puissance": 2, "presence": 1},
             blood_rank=BloodRank.ANCILLA,
             backgrounds={"Influence syndicale": 2, "Contacts": 1},
-            loyalty=68, ambition=76, is_primogen=True,
+            relation_to_primogen=2, loyalty=68, ambition=76, is_primogen=True,
         ),
         "brujah_sarah": Character(
             id="brujah_sarah", name="Sarah Morel", clan_id="brujah",
@@ -125,7 +126,7 @@ def seed_characters() -> dict[str, Character]:
             disciplines={"celerite": 1, "puissance": 2},
             blood_rank=BloodRank.NEWBORN,
             backgrounds={"Contacts": 1, "Alliés": 1},
-            loyalty=35, ambition=82,
+            relation_to_primogen=0, loyalty=35, ambition=82,
         ),
         "brujah_yann": Character(
             id="brujah_yann", name="Yann Kergoat", clan_id="brujah",
@@ -135,7 +136,7 @@ def seed_characters() -> dict[str, Character]:
             disciplines={"celerite": 2, "presence": 1},
             blood_rank=BloodRank.NEWBORN,
             backgrounds={"Contacts": 2, "Ressources": 1},
-            loyalty=70, ambition=64,
+            relation_to_primogen=2, loyalty=70, ambition=64,
         ),
         "brujah_ines": Character(
             id="brujah_ines", name="Ines Le Floch", clan_id="brujah",
@@ -145,7 +146,7 @@ def seed_characters() -> dict[str, Character]:
             disciplines={"presence": 2, "celerite": 1},
             blood_rank=BloodRank.NEWBORN,
             backgrounds={"Alliés": 2},
-            loyalty=52, ambition=50,
+            relation_to_primogen=1, loyalty=52, ambition=50,
         ),
     }
 
@@ -181,44 +182,42 @@ def create_initial_game_state() -> GameState:
     clan_states = {
         "ventrue": ClanPoliticalState(
             clan=clans["ventrue"],
+            coterie_memberships={
+                "primogen_ventrue": CoterieSide.PRIMOGEN,
+                "ventrue_victor": CoterieSide.PRIMOGEN,
+                "ventrue_claire": CoterieSide.OPPOSITION,
+                "ventrue_helene": CoterieSide.OPPOSITION,
+            },
+            opposition_leader_id="ventrue_claire",
+            opposition_allied_primogen_id="primogen_brujah",
             relations={"toreador": 5, "brujah": 0},
         ),
         "toreador": ClanPoliticalState(
             clan=clans["toreador"],
+            coterie_memberships={
+                "primogen_toreador": CoterieSide.PRIMOGEN,
+                "toreador_camille": CoterieSide.PRIMOGEN,
+                "toreador_noemie": CoterieSide.PRIMOGEN,
+                "toreador_lucien": CoterieSide.OPPOSITION,
+                "toreador_gabriel": CoterieSide.OPPOSITION,
+            },
+            opposition_leader_id="toreador_lucien",
+            opposition_allied_primogen_id="primogen_brujah",
             relations={"ventrue": 5, "brujah": 5},
         ),
         "brujah": ClanPoliticalState(
             clan=clans["brujah"],
+            coterie_memberships={
+                "primogen_brujah": CoterieSide.PRIMOGEN,
+                "brujah_yann": CoterieSide.PRIMOGEN,
+                "brujah_ines": CoterieSide.PRIMOGEN,
+                "brujah_sarah": CoterieSide.OPPOSITION,
+            },
+            opposition_leader_id="brujah_sarah",
+            opposition_allied_primogen_id="primogen_ventrue",
             relations={"ventrue": 0, "toreador": 5},
         ),
     }
     state = GameState(characters=characters, clan_states=clan_states)
-    initialize_current_politics(state)
-
-    state.clan_states["ventrue"].current_loyalties.update({
-        "ventrue__humanist_reformist": 48,
-        "ventrue__humanist_traditional": 55,
-    })
-    state.clan_states["ventrue"].current_allies.update({
-        "ventrue__humanist_reformist": "primogen_toreador",
-        "ventrue__humanist_traditional": "primogen_toreador",
-    })
-    state.clan_states["toreador"].current_loyalties.update({
-        "toreador__humanist_reformist": 50,
-        "toreador__predatory_radical": 42,
-        "toreador__predatory_traditional": 46,
-    })
-    state.clan_states["toreador"].current_allies.update({
-        "toreador__humanist_reformist": "primogen_brujah",
-        "toreador__predatory_radical": "primogen_brujah",
-        "toreador__predatory_traditional": "primogen_ventrue",
-    })
-    state.clan_states["brujah"].current_loyalties.update({
-        "brujah__predatory_radical": 40,
-        "brujah__humanist_traditional": 45,
-    })
-    state.clan_states["brujah"].current_allies.update({
-        "brujah__predatory_radical": "primogen_toreador",
-        "brujah__humanist_traditional": "primogen_toreador",
-    })
+    initialize_coteries(state)
     return state
