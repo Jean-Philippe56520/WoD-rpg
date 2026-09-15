@@ -82,6 +82,24 @@ class NightCycleStore:
 
         current = self.get_state(character.game_id, character.player_id)
         if current is not None and self._matches(current, character):
+            if (
+                current.phase == NightPhase.EVENT
+                and not current.log
+                and current.event_id != event_id
+            ):
+                with self.repository._connect() as con:
+                    con.execute(
+                        """
+                        UPDATE wod_character_night_state
+                        SET event_id=?, updated_at=CURRENT_TIMESTAMP
+                        WHERE game_id=? AND player_id=? AND phase='event' AND log_json='[]'
+                        """,
+                        (event_id, character.game_id, character.player_id),
+                    )
+                refreshed = self.get_state(character.game_id, character.player_id)
+                if refreshed is None:
+                    raise RuntimeError("Night-cycle state vanished during event recovery")
+                return refreshed
             return current
         with self.repository._connect() as con:
             con.execute("""
