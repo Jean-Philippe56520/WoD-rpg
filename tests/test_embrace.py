@@ -4,6 +4,7 @@ from game.config import DEFAULT_RULES
 from game.coteries import coterie_influence
 from game.embrace import (
     calculate_embrace_cost,
+    childe_character_id,
     create_embrace_request,
     decide_embrace_request,
     process_primogen_petition,
@@ -41,7 +42,7 @@ def test_embrace_cost_penalises_same_clan_opposition_request_against_primogen():
     assert cost == 20
 
 
-def test_approval_deducts_capital_and_strengthens_requesters_coterie_influence():
+def test_approval_deducts_capital_strengthens_requester_and_adds_childe_influence():
     state = state_with_ventrue_prince()
     before_coterie = coterie_influence(state, "toreador", CoterieSide.PRIMOGEN)
     before_personal = state.characters["toreador_camille"].personal_influence
@@ -53,7 +54,12 @@ def test_approval_deducts_capital_and_strengthens_requesters_coterie_influence()
     assert request.status == EmbraceStatus.APPROVED
     assert state.prince_political_capital == DEFAULT_RULES.prince_initial_capital - request.political_cost
     assert state.characters["toreador_camille"].personal_influence == before_personal + DEFAULT_RULES.embrace_requester_influence_gain
-    assert coterie_influence(state, "toreador", CoterieSide.PRIMOGEN) == before_coterie + DEFAULT_RULES.embrace_requester_influence_gain
+    assert childe_character_id(request.id) in state.characters
+    assert coterie_influence(state, "toreador", CoterieSide.PRIMOGEN) == (
+        before_coterie
+        + DEFAULT_RULES.embrace_requester_influence_gain
+        + DEFAULT_RULES.embrace_childe_initial_influence
+    )
     assert state.prince_relations["toreador"] == DEFAULT_RULES.approve_relation_support
 
 
