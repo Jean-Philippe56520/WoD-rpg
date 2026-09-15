@@ -3,6 +3,7 @@ import pytest
 from game.actions import apply_action
 from game.domains import (
     active_hunting_rights,
+    expire_hunting_rights,
     grant_hunting_right,
     has_hunting_access,
     resolve_domain_pressure,
@@ -54,6 +55,24 @@ def test_hunting_right_is_distinct_from_domain_ownership():
     assert has_hunting_access(state, "ventrue_helene", "quartier_affaires")
 
 
+def test_hunting_right_duration_counts_exact_nights_from_grant_night():
+    state = create_initial_game_state()
+    right = grant_hunting_right(
+        state,
+        domain_id="quartier_affaires",
+        beneficiary_id="ventrue_helene",
+        granted_by_id="primogen_ventrue",
+        duration_nights=3,
+    )
+    assert right.expires_night == state.night + 2
+    state.night = right.expires_night
+    assert expire_hunting_rights(state) == []
+    assert right.status == HuntingRightStatus.ACTIVE
+    state.night += 1
+    assert expire_hunting_rights(state) == [right]
+    assert right.status == HuntingRightStatus.EXPIRED
+
+
 def test_non_holder_cannot_grant_hunting_right_without_being_prince():
     state = create_initial_game_state()
     with pytest.raises(ValueError, match="holder or Prince"):
@@ -100,7 +119,7 @@ def test_braconnage_raises_pressure_and_detected_intrusion_opens_dispute():
         GameAction(
             clan_id="brujah",
             action_type=ActionType.BRACONNAGE,
-            actor_character_id="brujah_sarah",
+            actor_character_id="primogen_brujah",
             target_domain_id="vieux_centre",
         ),
     )
