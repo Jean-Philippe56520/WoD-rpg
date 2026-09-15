@@ -11,6 +11,10 @@ from game.qa_scenarios import QA_SCENARIOS, qa_snapshot
 APP_PATH = Path(__file__).resolve().parents[1] / "qa_app.py"
 
 
+def _scenario_label(scenario_id: str) -> str:
+    return next(scenario.label for scenario in QA_SCENARIOS if scenario.id == scenario_id)
+
+
 def _app(monkeypatch, tmp_path):
     monkeypatch.setenv("WOD_QA_DATA_DIR", str(tmp_path))
     app = AppTest.from_file(str(APP_PATH), default_timeout=10)
@@ -24,7 +28,7 @@ def _repo(tmp_path, scenario_id: str):
 
 
 def _select_scenario(app, scenario_id: str):
-    app.selectbox(key="qa_scenario_selector").select(scenario_id).run()
+    app.selectbox(key="qa_scenario_selector").select(_scenario_label(scenario_id)).run()
     assert not app.exception
     return app
 
@@ -40,7 +44,7 @@ def _text_values(elements):
 def test_qa_harness_opens_on_isolated_first_night(monkeypatch, tmp_path):
     app = _app(monkeypatch, tmp_path)
 
-    assert app.selectbox(key="qa_scenario_selector").value == "first_night"
+    assert app.selectbox(key="qa_scenario_selector").value == _scenario_label("first_night")
     assert any("laboratoire QA" in value for value in _text_values(app.title))
     assert any("Agnès de Chartres" in value for value in _text_values(app.title))
     assert any("aucune écriture Supabase" in value for value in _text_values(app.error))
