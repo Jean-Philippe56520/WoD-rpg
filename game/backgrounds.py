@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 
 @dataclass(frozen=True)
@@ -42,14 +42,25 @@ BACKGROUND_DEFINITIONS: dict[str, BackgroundDefinition] = {
     ),
 }
 
-# Un Historique pertinent modifie les circonstances, pas la compétence du vampire.
-# Pour le MVP, un seul Historique principal peut réduire la difficulté d'une même
-# approche. Cette limite évite l'empilement automatique Contacts + Ressources + Statut.
 BACKGROUND_DIFFICULTY_ADJUSTMENT = {
     "contacts": -1,
     "resources": -1,
     "status": -1,
     "sire": 0,
+}
+
+# Le contenu déclare explicitement où un Historique a du sens. On ne déduit jamais
+# qu'un réseau de Contacts ou des Ressources s'applique à toute action du même type.
+APPROACH_BACKGROUNDS: dict[tuple[str, str], tuple[str, ...]] = {
+    ("political_current", "listen"): ("contacts",),
+    ("political_current", "support_order"): ("status",),
+    ("political_current", "defend_autonomy"): ("status",),
+    ("sire_release", "formal_release"): ("status",),
+    ("sire_release", "private_release"): ("sire",),
+    ("toreador_patronage", "protect_artist"): ("contacts", "resources"),
+    ("toreador_patronage", "observe"): ("contacts",),
+    ("ventrue_oath", "arbitrate"): ("status", "resources"),
+    ("ventrue_oath", "useful_oath"): ("contacts",),
 }
 
 
@@ -75,11 +86,7 @@ def background_unlocked(character, profile, background_id: str, minimum: int = 1
 
 
 def background_leverage(character, profile, allowed: tuple[str, ...]) -> BackgroundLeverage | None:
-    """Choisit le meilleur Historique explicitement autorisé par une approche.
-
-    L'approche déclare les Historiques qui ont du sens dans son contenu. Le moteur
-    ne déduit jamais qu'un Contact ou des Ressources s'appliquent à toutes les scènes.
-    """
+    """Choisit le meilleur Historique explicitement autorisé par une approche."""
 
     candidates: list[BackgroundLeverage] = []
     for background_id in allowed:
@@ -105,9 +112,28 @@ def background_leverage(character, profile, allowed: tuple[str, ...]) -> Backgro
         )
     if not candidates:
         return None
-    # D'abord le levier qui améliore le plus le contexte, puis le plus haut rating,
-    # enfin un ordre stable pour assurer la déterminisme asynchrone.
     return sorted(
         candidates,
         key=lambda item: (item.difficulty_adjustment, -item.rating, item.id),
     )[0]
+
+
+def leverage_for_approach(character, profile, situation, choice) -> BackgroundLeverage | None:
+    allowed = APPROACH_BACKGROUNDS.get((situation.id, choice.id), ())
+    return background_leverage(character, profile, allowed)
+
+
+def apply_background_leverage(character, profile, situation, choice):
+    """Retourne une copie contextuelle du choix et le levier appliqué.
+
+    La copie ne change que la difficulté interne. Le score du personnage, sa
+    Compétence et l'Historique lui-même ne sont jamais modifiés par l'opération.
+    """
+
+    leverage = leverage_for_approach(character, profile, situation, choice)
+    if leverage is None or leverage.difficulty_adjustment == 0:
+        return choice, leverage
+    return (
+        replace(choice, difficulty=max(1, choice.difficulty + leverage.difficulty_adjustment)),
+        leverage,
+    )
