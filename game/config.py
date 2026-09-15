@@ -113,6 +113,25 @@ class GameRules:
     hunter_incident_domain_pressure_gain: int = 1
     hunter_incident_attention_relief: int = 2
 
+    # V0.20 : une pression extérieure ouvre une crise concrète avant la conséquence
+    # majeure. Les vampires doivent y consacrer leurs actions nocturnes.
+    crisis_stage_duration_nights: int = 1
+    crisis_base_difficulty: int = 3
+    crisis_stage1_required_progress: int = 2
+    crisis_late_stage_required_progress: int = 3
+    crisis_escalation_domain_pressure_gain: int = 1
+    crisis_exploit_influence_gain: float = 1.0
+    crisis_exploit_target_influence_loss: float = 1.0
+    hunter_crisis_stage3_masquerade_loss: float = 1.0
+    hunter_crisis_failure_domain_pressure_gain: int = 2
+    hunter_crisis_failure_masquerade_loss: float = 4.0
+    hunter_crisis_failure_servage_loss: int = 1
+    anarch_crisis_stage3_stability_loss: float = 1.0
+    anarch_crisis_failure_domain_pressure_gain: int = 2
+    anarch_crisis_failure_stability_loss: float = 3.0
+    anarch_crisis_failure_holder_influence_loss: float = 2.0
+    anarch_crisis_failure_opposition_influence_gain: float = 1.0
+
     approve_relation_support: float = 3.0
     approve_relation_neutral: float = 0.0
     approve_relation_oppose: float = -8.0
