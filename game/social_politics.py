@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from .domains import grant_hunting_right, initialize_domains
 from .factions import effective_relation_to_primogen
 from .models import (
     Boon,
@@ -155,7 +156,7 @@ def active_grievance_score(
 _REQUEST_BY_AMBITION = {
     PoliticalAmbition.INCREASE_INFLUENCE: PoliticalRequestType.PATRONAGE,
     PoliticalAmbition.OBTAIN_EMBRACE: PoliticalRequestType.EMBRACE_SUPPORT,
-    PoliticalAmbition.GAIN_DOMAIN: PoliticalRequestType.PATRONAGE,
+    PoliticalAmbition.GAIN_DOMAIN: PoliticalRequestType.DOMAIN_ACCESS,
     PoliticalAmbition.GAIN_BOON: PoliticalRequestType.BOON,
     PoliticalAmbition.LEAD_OPPOSITION: PoliticalRequestType.RESPONSIBILITY,
     PoliticalAmbition.WEAKEN_RIVAL: PoliticalRequestType.INTERNAL_CONFLICT,
@@ -166,8 +167,33 @@ _REQUEST_BY_AMBITION = {
 }
 
 
-def _request_description(state: GameState, requester_id: str, request_type: PoliticalRequestType) -> str:
+def _domain_target_for_request(state: GameState, requester_id: str) -> str | None:
     requester = state.characters[requester_id]
+    if not requester.clan_id:
+        return None
+    primogen_id = state.clan_states[requester.clan_id].clan.primogen_id
+    candidates = sorted(
+        (
+            domain
+            for domain in state.domains.values()
+            if domain.holder_id == primogen_id
+        ),
+        key=lambda domain: (-domain.viandis, -domain.servage, domain.id),
+    )
+    return candidates[0].id if candidates else None
+
+
+def _request_description(
+    state: GameState,
+    requester_id: str,
+    request_type: PoliticalRequestType,
+    target_id: str | None = None,
+) -> str:
+    requester = state.characters[requester_id]
+    if request_type == PoliticalRequestType.DOMAIN_ACCESS:
+        domain = state.domains.get(target_id or "")
+        domain_name = domain.name if domain else "un Domaine du Primogène"
+        return f"{requester.name} demande un droit de chasse reconnu sur {domain_name}."
     descriptions = {
         PoliticalRequestType.EMBRACE_SUPPORT: f"{requester.name} demande que le Primogène soutienne sa future demande d'Étreinte.",
         PoliticalRequestType.RESPONSIBILITY: f"{requester.name} réclame davantage de responsabilités politiques dans le clan.",
@@ -183,6 +209,7 @@ def _request_description(state: GameState, requester_id: str, request_type: Poli
 def generate_requests_for_night(state: GameState) -> list[PoliticalRequest]:
     """Crée au plus une requête motivée par clan et par nuit, sans hasard."""
 
+    initialize_domains(state)
     created: list[PoliticalRequest] = []
     existing_keys = {
         (request.clan_id, request.created_night)
@@ -218,6 +245,12 @@ def generate_requests_for_night(state: GameState) -> list[PoliticalRequest]:
 
         requester = max(candidates, key=priority)
         request_type = _REQUEST_BY_AMBITION[requester.political_ambition]
+        target_id = None
+        if request_type == PoliticalRequestType.DOMAIN_ACCESS:
+            target_id = _domain_target_for_request(state, requester.id)
+            if target_id is None:
+                request_type = PoliticalRequestType.PATRONAGE
+
         offered_boon = (
             BoonLevel.MINOR
             if effective_relation_to_primogen(state, requester.id) <= 1
@@ -234,13 +267,46 @@ def generate_requests_for_night(state: GameState) -> list[PoliticalRequest]:
             clan_id=clan_id,
             requester_id=requester.id,
             request_type=request_type,
-            description=_request_description(state, requester.id, request_type),
+            description=_request_description(state, requester.id, request_type, target_id),
             created_night=state.night,
+            target_id=target_id,
             offered_boon_level=offered_boon,
         )
         state.political_requests[request.id] = request
         created.append(request)
     return created
+
+
+def _grant_requested_domain_access(
+    state: GameState,
+    request: PoliticalRequest,
+    primogen_id: str,
+    *,
+    boon_level: BoonLevel | None,
+) -> str:
+    if not request.target_id or request.target_id not in state.domains:
+        raise ValueError("Domain-access request has no valid target domain")
+    requester = state.characters[request.requester_id]
+    boon_id = None
+    if boon_level:
+        boon = create_boon(
+            state,
+            creditor_id=primogen_id,
+            debtor_id=requester.id,
+            level=boon_level,
+            origin=f"Droit de chasse accordé sur {state.domains[request.target_id].name}",
+        )
+        boon_id = boon.id
+    right = grant_hunting_right(
+        state,
+        domain_id=request.target_id,
+        beneficiary_id=requester.id,
+        granted_by_id=primogen_id,
+        duration_nights=3,
+        conditions=f"Accès politique issu de la requête {request.id}",
+        boon_id=boon_id,
+    )
+    return right.id
 
 
 def process_request_decision(
@@ -264,15 +330,28 @@ def process_request_decision(
     if decision == RequestDecision.ACCEPT:
         request.status = PoliticalRequestStatus.ACCEPTED
         requester.relation_to_primogen = _clamp_relation(requester.relation_to_primogen + 1)
-        if request.offered_boon_level:
-            create_boon(
+        if request.request_type == PoliticalRequestType.DOMAIN_ACCESS:
+            _grant_requested_domain_access(
                 state,
-                creditor_id=primogen.id,
-                debtor_id=requester.id,
-                level=request.offered_boon_level,
-                origin=f"Contrepartie à la requête {request.id}",
+                request,
+                primogen.id,
+                boon_level=request.offered_boon_level,
             )
-        message = f"{primogen.name} accepte la requête de {requester.name}. Leur relation se renforce."
+            domain = state.domains[request.target_id]
+            message = (
+                f"{primogen.name} accorde à {requester.name} un droit de chasse sur {domain.name}. "
+                "Leur relation se renforce."
+            )
+        else:
+            if request.offered_boon_level:
+                create_boon(
+                    state,
+                    creditor_id=primogen.id,
+                    debtor_id=requester.id,
+                    level=request.offered_boon_level,
+                    origin=f"Contrepartie à la requête {request.id}",
+                )
+            message = f"{primogen.name} accepte la requête de {requester.name}. Leur relation se renforce."
 
     elif decision == RequestDecision.REFUSE:
         request.status = PoliticalRequestStatus.REFUSED
@@ -289,17 +368,31 @@ def process_request_decision(
 
     elif decision == RequestDecision.NEGOTIATE:
         request.status = PoliticalRequestStatus.NEGOTIATED
-        boon = create_boon(
-            state,
-            creditor_id=primogen.id,
-            debtor_id=requester.id,
-            level=request.offered_boon_level or BoonLevel.MINOR,
-            origin=f"Négociation de la requête {request.id}",
-        )
-        message = (
-            f"{primogen.name} négocie avec {requester.name}. "
-            f"{requester.name} contracte une faveur {boon.level.value}."
-        )
+        if request.request_type == PoliticalRequestType.DOMAIN_ACCESS:
+            boon_level = request.offered_boon_level or BoonLevel.MINOR
+            _grant_requested_domain_access(
+                state,
+                request,
+                primogen.id,
+                boon_level=boon_level,
+            )
+            domain = state.domains[request.target_id]
+            message = (
+                f"{primogen.name} accorde à {requester.name} un droit de chasse sur {domain.name} "
+                f"contre une faveur {boon_level.value}."
+            )
+        else:
+            boon = create_boon(
+                state,
+                creditor_id=primogen.id,
+                debtor_id=requester.id,
+                level=request.offered_boon_level or BoonLevel.MINOR,
+                origin=f"Négociation de la requête {request.id}",
+            )
+            message = (
+                f"{primogen.name} négocie avec {requester.name}. "
+                f"{requester.name} contracte une faveur {boon.level.value}."
+            )
 
     else:
         request.status = PoliticalRequestStatus.PROMISED
@@ -332,12 +425,20 @@ def fulfill_promise(state: GameState, promise_id: str) -> PoliticalPromise:
         raise ValueError("Unknown political promise")
     if promise.status != PromiseStatus.PENDING:
         raise ValueError("Promise is no longer pending")
+    if promise.request_id and promise.request_id in state.political_requests:
+        request = state.political_requests[promise.request_id]
+        if request.request_type == PoliticalRequestType.DOMAIN_ACCESS:
+            _grant_requested_domain_access(
+                state,
+                request,
+                promise.promisor_id,
+                boon_level=None,
+            )
+        request.status = PoliticalRequestStatus.RESOLVED
     promise.status = PromiseStatus.FULFILLED
     promise.resolved_night = state.night
     beneficiary = state.characters[promise.beneficiary_id]
     beneficiary.relation_to_primogen = _clamp_relation(beneficiary.relation_to_primogen + 1)
-    if promise.request_id and promise.request_id in state.political_requests:
-        state.political_requests[promise.request_id].status = PoliticalRequestStatus.RESOLVED
     return promise
 
 
