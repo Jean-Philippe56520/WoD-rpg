@@ -200,10 +200,19 @@ class NightCycleStore:
             except ValueError:
                 pass
         action_count = sum(item.get("kind") == "free_action" for item in state.log)
-        details = [
-            f"{item.get('title')} — {item.get('consequence')}"
-            for item in state.log if item.get("title") and item.get("consequence")
-        ]
+        details: list[str] = []
+        for index, item in enumerate(state.log):
+            kind = "Événement" if item.get("kind") == "event" else f"Action libre {index}"
+            title = str(item.get("title", "")).strip()
+            choice = str(item.get("choice_label", "")).strip()
+            summary = str(item.get("summary", "")).strip()
+            detail = str(item.get("detail", "")).strip()
+            consequence = str(item.get("consequence", "")).strip()
+            parts = [part for part in (summary, detail, consequence) if part]
+            header = f"{kind} — {title}" if title else kind
+            if choice:
+                header += f" · Décision : {choice}"
+            details.append(f"{header}. {' '.join(parts)}".strip())
         outcome = NightOutcome(
             action=last_action,
             roll=sum(int(item.get("successes", 0)) for item in state.log),
@@ -211,5 +220,6 @@ class NightCycleStore:
             detail=" ".join(details) or "La nuit s'achève sans autre fait notable.",
             updated_character=updated,
             tags=("night_cycle", "event_then_free_actions"),
+            steps=state.log,
         )
         return ChronicleStore(self.repository).advance_personal_night(character, outcome)
