@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 import hashlib
 
+from .agenda_engine import agenda_effect
 from .chronicle import PlayerCharacter, SIRES
 from .chronicle_simulation import (
     DomainState,
@@ -251,7 +252,7 @@ def _social_action(
 
     target_id = target_ids[_deterministic_score(f"target:{npc_id}:{year}:{chapter}:{segment}", len(target_ids))]
     target = current.npcs[target_id]
-    effect = score % 4
+    effect = agenda_effect(actor, score)
 
     if effect == 0:
         current = _change_relation(current, npc_id, target_id, 1)

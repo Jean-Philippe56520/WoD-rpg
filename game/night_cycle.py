@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from enum import Enum
-from typing import Any
+from typing import Any, Mapping, Sequence
 
 from .chronicle import PlayerCharacter
 from .relationship_memory import memory_for
 from .situations import Situation, SituationResolution, generate_situations, resolve_situation
+from .world_situations import world_event_situations
 
 MAX_FREE_ACTIONS = 2
 
@@ -92,8 +93,41 @@ def _resolve_with_step_nonce(
     return replace(resolution, situation=situation, choice=canonical_choice)
 
 
-def choose_night_event(character: PlayerCharacter, profile, simulation, *, year: int) -> Situation:
-    situations = generate_situations(character, profile, simulation, year=year)
+def available_situations(
+    character: PlayerCharacter,
+    profile,
+    simulation,
+    *,
+    year: int,
+    world_events: Sequence[Mapping] = (),
+    nights_per_cycle: int = 3,
+) -> tuple[Situation, ...]:
+    emergent = world_event_situations(
+        character,
+        simulation,
+        world_events,
+        nights_per_cycle=nights_per_cycle,
+    )
+    return emergent + generate_situations(character, profile, simulation, year=year)
+
+
+def choose_night_event(
+    character: PlayerCharacter,
+    profile,
+    simulation,
+    *,
+    year: int,
+    world_events: Sequence[Mapping] = (),
+    nights_per_cycle: int = 3,
+) -> Situation:
+    situations = available_situations(
+        character,
+        profile,
+        simulation,
+        year=year,
+        world_events=world_events,
+        nights_per_cycle=nights_per_cycle,
+    )
     candidates = tuple(item for item in situations if not item.id.startswith("hunt_"))
     if not candidates:
         return situations[0]
@@ -113,6 +147,12 @@ def choose_night_event(character: PlayerCharacter, profile, simulation, *, year:
         if intensity >= 4:
             return sire_event
 
+    # A real consequence of the preceding Convergence takes priority over the
+    # generic fallback once personal sire obligations have been checked.
+    emergent = next((item for item in candidates if item.id.startswith("world_event_")), None)
+    if emergent is not None:
+        return emergent
+
     return candidates[(character.chapter + character.segment + character.local_night) % len(candidates)]
 
 
@@ -123,10 +163,19 @@ def free_action_situations(
     *,
     year: int,
     event_id: str,
+    world_events: Sequence[Mapping] = (),
+    nights_per_cycle: int = 3,
 ) -> tuple[Situation, ...]:
     return tuple(
         item
-        for item in generate_situations(character, profile, simulation, year=year)
+        for item in available_situations(
+            character,
+            profile,
+            simulation,
+            year=year,
+            world_events=world_events,
+            nights_per_cycle=nights_per_cycle,
+        )
         if item.id != event_id
     )
 
