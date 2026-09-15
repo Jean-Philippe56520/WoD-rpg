@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from .config import DEFAULT_RULES, GameRules
-from .models import ClanNightOrders, ClanNightReport, NightStatus
+from .models import ClanNightOrders, ClanNightReport, NightStatus, PoliticalRequestStatus
 from .persistence import GameRepository
 from .resolution import resolve_night
 from .world import REQUIRED_CLANS, candidates_from_state, create_initial_game_state
@@ -37,13 +37,13 @@ class MultiplayerGameService:
                 if character.clan_id == clan_id and character.id != state.prince_id
             }
             if len(orders.actions) != len(eligible_ids):
-                raise ValueError("V0.8 requires exactly one action per active clan member")
+                raise ValueError("V0.8+ requires exactly one action per active clan member")
             used_actors: set[str] = set()
             for action in orders.actions:
                 if action.clan_id != clan_id:
                     raise ValueError("A player cannot submit actions for another clan")
                 if not action.actor_character_id:
-                    raise ValueError("V0.8 actions require an acting character")
+                    raise ValueError("V0.8+ actions require an acting character")
                 if action.actor_character_id not in eligible_ids:
                     raise ValueError("Action actor must be an active member of the player's clan")
                 if action.actor_character_id in used_actors:
@@ -58,6 +58,20 @@ class MultiplayerGameService:
             for action in orders.actions:
                 if action.clan_id != clan_id:
                     raise ValueError("A player cannot submit actions for another clan")
+
+        if orders.version >= 3:
+            open_request_ids = {
+                request.id
+                for request in state.political_requests.values()
+                if request.clan_id == clan_id and request.status == PoliticalRequestStatus.OPEN
+            }
+            decision_ids = [item.request_id for item in orders.request_decisions]
+            if len(decision_ids) != len(set(decision_ids)):
+                raise ValueError("A political request may receive only one decision")
+            if set(decision_ids) != open_request_ids:
+                raise ValueError("Every open political request must receive a Primogen decision")
+        elif orders.request_decisions:
+            raise ValueError("Political request decisions require V0.9 orders")
 
         primogen_id = state.clan_states[clan_id].clan.primogen_id
         if state.prince_id is None:
@@ -114,12 +128,16 @@ class MultiplayerGameService:
             actions = []
             votes = {}
             petitions = []
+            request_decisions = []
             for clan_id, orders in bundle.orders_by_clan.items():
                 self.validate_orders(bundle.state, clan_id, orders)
                 actions.extend(orders.actions)
                 if orders.vote:
                     votes[orders.vote.primogen_id] = orders.vote
                 petitions.extend((clan_id, petition) for petition in orders.embrace_petitions)
+                request_decisions.extend(
+                    (clan_id, decision) for decision in orders.request_decisions
+                )
 
             previous_event_count = len(bundle.state.events)
             resolution = resolve_night(
@@ -128,6 +146,7 @@ class MultiplayerGameService:
                 votes,
                 candidates_from_state(bundle.state),
                 embrace_petitions=petitions,
+                request_decisions=request_decisions,
                 rules=self.rules,
             )
             new_events = resolution.state.events[previous_event_count:]

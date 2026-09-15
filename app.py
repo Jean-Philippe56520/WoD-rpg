@@ -11,21 +11,25 @@ from game.auth import (
     AuthSession,
     SupabaseAuthClient,
 )
-from game.coteries import (
+from game.factions import (
     clan_total_influence,
-    coterie_influence,
     effective_relation_to_primogen,
+    faction_influence,
     ideology_relation_modifier,
-    initialize_coteries,
+    initialize_factions,
 )
 from game.models import (
     ActionType,
+    BoonStatus,
+    ClanFactionSide,
     ClanNightOrders,
-    CoterieSide,
     EmbracePetitionOrder,
     GameAction,
     NightStatus,
+    PoliticalRequestDecisionOrder,
+    PoliticalRequestStatus,
     PrimogenVote,
+    RequestDecision,
 )
 from game.multiplayer import DEFAULT_GAME_ID, MultiplayerGameService
 from game.repository_factory import create_repository
@@ -35,7 +39,7 @@ from game.world import candidates_from_state
 
 st.set_page_config(page_title="WoD RPG - Chronique politique", page_icon="🩸", layout="wide")
 st.title("WoD RPG - Chronique politique")
-st.caption("V0.8 - coteries, relations personnelles et une action par vampire")
+st.caption("V0.9 - factions, Prestation, requêtes, griefs et autonomie politique")
 
 AUTH_SESSION_KEY = "wod_auth_session"
 LOCAL_PLAYER_KEY = "wod_local_player_id"
@@ -55,12 +59,29 @@ DISCIPLINE_LABELS = {
     "puissance": "Puissance",
 }
 
-COTERIE_LABELS = {
-    CoterieSide.PRIMOGEN: "Coterie du Primogène",
-    CoterieSide.OPPOSITION: "Opposition",
+FACTION_LABELS = {
+    ClanFactionSide.PRIMOGEN: "Faction du Primogène",
+    ClanFactionSide.OPPOSITION: "Faction d'opposition",
 }
 
-V08_ACTIONS = (
+MORTAL_STANCE_LABELS = {
+    "humanist": "Humaniste",
+    "predatory": "Prédateur",
+}
+
+ORDER_STANCE_LABELS = {
+    "orthodox": "Orthodoxe",
+    "reformist": "Réformateur",
+}
+
+REQUEST_DECISION_LABELS = {
+    RequestDecision.ACCEPT: "Accepter",
+    RequestDecision.REFUSE: "Refuser",
+    RequestDecision.NEGOTIATE: "Négocier",
+    RequestDecision.PROMISE: "Promettre",
+}
+
+V09_ACTIONS = (
     ActionType.BUILD_INFLUENCE,
     ActionType.DIPLOMACY,
     ActionType.CONSOLIDATE_RELATION,
@@ -68,6 +89,7 @@ V08_ACTIONS = (
     ActionType.UNDERMINE,
     ActionType.POACH,
     ActionType.INVESTIGATE,
+    ActionType.CALL_BOON,
 )
 
 
@@ -138,6 +160,13 @@ def render_authentication(auth: SupabaseAuthClient) -> None:
 
 def describe_orders(orders: ClanNightOrders, state) -> list[str]:
     lines: list[str] = []
+    for decision in orders.request_decisions:
+        request = state.political_requests.get(decision.request_id)
+        if request:
+            requester = state.characters[request.requester_id]
+            lines.append(
+                f"Requête de {requester.name} : {REQUEST_DECISION_LABELS[decision.decision]}"
+            )
     for index, action in enumerate(orders.actions, start=1):
         actor_id = action.actor_character_id or state.clan_states[orders.clan_id].clan.primogen_id
         actor = state.characters.get(actor_id)
@@ -150,7 +179,7 @@ def describe_orders(orders: ClanNightOrders, state) -> list[str]:
         lines.append(text)
     if orders.vote:
         candidate = state.characters.get(orders.vote.candidate_id)
-        lines.append(f"Vote de Praxis : {candidate.name if candidate else orders.vote.candidate_id}")
+        lines.append(f"Reconnaissance de Praxis : {candidate.name if candidate else orders.vote.candidate_id}")
     for petition in orders.embrace_petitions:
         member = state.characters[petition.member_id]
         lines.append(
@@ -184,6 +213,13 @@ def foreign_primogens(state, clan_id: str) -> list[str]:
         for other_clan_id, clan_state in state.clan_states.items()
         if other_clan_id != clan_id
     ]
+
+
+def political_profile(character) -> str:
+    return (
+        f"{MORTAL_STANCE_LABELS[character.mortal_stance.value]} · "
+        f"{ORDER_STANCE_LABELS[character.order_stance.value]}"
+    )
 
 
 try:
@@ -233,7 +269,7 @@ else:
 
 try:
     state = repo.get_game_state(DEFAULT_GAME_ID)
-    initialize_coteries(state)
+    initialize_factions(state)
     game_info = repo.get_game_info(DEFAULT_GAME_ID)
     assignments = repo.list_assignments(DEFAULT_GAME_ID)
     player_clan = repo.get_player_clan(DEFAULT_GAME_ID, player_id)
@@ -308,8 +344,8 @@ for col, clan_id in zip(status_cols, game_info["required_clans"]):
     col.metric(clan_names[clan_id], label)
     col.caption(controller)
 
-night_tab, clan_tab, city_tab, elysium_tab, reports_tab = st.tabs(
-    ["Ma nuit", "Mon clan", "Ville", "Elysium", "Mes rapports"]
+night_tab, clan_tab, prestation_tab, city_tab, elysium_tab, reports_tab = st.tabs(
+    ["Ma nuit", "Mon clan", "Prestation", "Ville", "Elysium", "Mes rapports"]
 )
 
 with night_tab:
@@ -348,28 +384,65 @@ with night_tab:
             ],
             key=lambda character: (
                 character.id != own_clan.primogen_id,
-                own_clan_state.coterie_memberships.get(character.id) == CoterieSide.OPPOSITION,
+                own_clan_state.faction_memberships.get(character.id) == ClanFactionSide.OPPOSITION,
                 -character.personal_influence,
             ),
         )
+        open_requests = sorted(
+            [
+                request
+                for request in state.political_requests.values()
+                if request.clan_id == player_clan and request.status == PoliticalRequestStatus.OPEN
+            ],
+            key=lambda request: (request.created_night, request.id),
+        )
 
         with st.form("night_orders"):
+            request_decisions: list[PoliticalRequestDecisionOrder] = []
+            if open_requests:
+                st.markdown("#### Requêtes adressées au Primogène")
+                st.caption(
+                    "Ces demandes sont personnelles. Refuser peut créer un grief ; promettre engage "
+                    "votre réputation ; négocier peut créer une dette de Prestation."
+                )
+                for request in open_requests:
+                    requester = state.characters[request.requester_id]
+                    with st.container(border=True):
+                        st.write(f"**{requester.name}** — {request.description}")
+                        st.caption(
+                            f"Faction : {FACTION_LABELS[own_clan_state.faction_memberships.get(requester.id, ClanFactionSide.PRIMOGEN)]} · "
+                            f"relation effective {effective_relation_to_primogen(state, requester.id):+d}"
+                        )
+                        if request.offered_boon_level:
+                            st.caption(
+                                f"Contrepartie proposée : faveur {request.offered_boon_level.value}."
+                            )
+                        decision = st.selectbox(
+                            "Réponse",
+                            options=list(RequestDecision),
+                            format_func=lambda item: REQUEST_DECISION_LABELS[item],
+                            key=f"request_decision_{request.id}_{state.night}",
+                        )
+                        request_decisions.append(
+                            PoliticalRequestDecisionOrder(request.id, decision)
+                        )
+
             st.markdown("#### Une action par vampire")
             st.caption(
-                "Vous choisissez une mission pour chaque membre actif. Un opposant peut refuser une "
-                "mission si sa relation au Primogène est faible ; une diplomatie compatible avec son "
-                "idéologie est plus facilement acceptée."
+                "Vous attribuez une mission à chaque membre actif. Un opposant conserve ses intérêts "
+                "propres et peut refuser une mission qui sert mal sa position."
             )
             actions: list[GameAction] = []
 
             for actor in active_members:
-                side = own_clan_state.coterie_memberships.get(actor.id, CoterieSide.PRIMOGEN)
+                side = own_clan_state.faction_memberships.get(actor.id, ClanFactionSide.PRIMOGEN)
                 effective = effective_relation_to_primogen(state, actor.id)
                 with st.container(border=True):
-                    st.markdown(f"##### {actor.name} — {COTERIE_LABELS[side]}")
+                    st.markdown(f"##### {actor.name} — {FACTION_LABELS[side]}")
                     st.caption(
-                        f"Humanité {actor.humanity_axis.value} · Traditions {actor.tradition_axis.value} · "
-                        f"relation au Primogène {actor.relation_to_primogen}/2 · effective {effective:+d}"
+                        f"{political_profile(actor)} · Humanité {actor.humanity}/10 · Statut {actor.status}/5 · "
+                        f"réputation {actor.reputation:+d} · relation au Primogène {actor.relation_to_primogen}/2 · "
+                        f"effective {effective:+d}"
                     )
 
                     own_targets = [
@@ -380,7 +453,7 @@ with night_tab:
                     recruit_targets = [
                         character_id
                         for character_id in own_targets
-                        if own_clan_state.coterie_memberships.get(character_id) != side
+                        if own_clan_state.faction_memberships.get(character_id) != side
                     ]
                     known_foreign = known_foreign_members(state, player_clan, 1)
                     known_foreign_non_primogens = [
@@ -393,12 +466,19 @@ with night_tab:
                         character_id
                         for character_id in known_foreign_members(state, player_clan, 2)
                         if character_id in known_foreign_non_primogens
-                        and state.clan_states[state.characters[character_id].clan_id].coterie_memberships.get(
+                        and state.clan_states[state.characters[character_id].clan_id].faction_memberships.get(
                             character_id
                         )
-                        == CoterieSide.PRIMOGEN
+                        == ClanFactionSide.PRIMOGEN
                         and effective_relation_to_primogen(state, character_id) <= 0
                     ]
+                    boon_targets = sorted(
+                        {
+                            boon.debtor_id
+                            for boon in state.boons.values()
+                            if boon.creditor_id == actor.id and boon.status == BoonStatus.DUE
+                        }
+                    )
 
                     options = [ActionType.BUILD_INFLUENCE, ActionType.DIPLOMACY, ActionType.INVESTIGATE]
                     if own_targets:
@@ -409,6 +489,8 @@ with night_tab:
                         options.append(ActionType.UNDERMINE)
                     if poach_targets:
                         options.append(ActionType.POACH)
+                    if boon_targets:
+                        options.append(ActionType.CALL_BOON)
 
                     action_type = st.selectbox(
                         "Action",
@@ -440,7 +522,7 @@ with night_tab:
                         )
                     elif action_type == ActionType.RECRUIT:
                         target_character_id = st.selectbox(
-                            "Membre de l'autre coterie",
+                            "Membre de l'autre faction",
                             options=recruit_targets,
                             format_func=lambda cid: state.characters[cid].name,
                             key=f"target_recruit_{state.night}_{actor.id}",
@@ -470,6 +552,13 @@ with night_tab:
                             format_func=lambda cid: clan_names[cid],
                             key=f"target_investigate_{state.night}_{actor.id}",
                         )
+                    elif action_type == ActionType.CALL_BOON:
+                        target_character_id = st.selectbox(
+                            "Débiteur",
+                            options=boon_targets,
+                            format_func=lambda cid: state.characters[cid].name,
+                            key=f"target_boon_{state.night}_{actor.id}",
+                        )
 
                     actions.append(
                         GameAction(
@@ -483,9 +572,13 @@ with night_tab:
 
             vote = None
             if state.prince_id is None:
-                st.markdown("#### Praxis")
+                st.markdown("#### Reconnaissance de la Praxis")
+                st.caption(
+                    "Dans cette chronique, le Conseil des Primogènes sert de mécanisme local de reconnaissance "
+                    "d'une Praxis ; ce n'est pas une procédure universelle de la Camarilla."
+                )
                 candidate_id = st.selectbox(
-                    "Vote de votre Primogène",
+                    "Candidat reconnu par votre Primogène",
                     options=list(candidate_labels),
                     index=(
                         list(candidate_labels).index(own_clan.primogen_id)
@@ -526,7 +619,8 @@ with night_tab:
                         actions=tuple(actions),
                         vote=vote,
                         embrace_petitions=tuple(petitions),
-                        version=2,
+                        request_decisions=tuple(request_decisions),
+                        version=3,
                     )
                     resolved = service.submit_orders(player_id, orders)
                     if resolved:
@@ -542,12 +636,12 @@ with clan_tab:
     total_col, primogen_col, opposition_col = st.columns(3)
     total_col.metric("Influence totale", f"{clan_total_influence(state, player_clan):.0f}")
     primogen_col.metric(
-        "Coterie du Primogène",
-        f"{coterie_influence(state, player_clan, CoterieSide.PRIMOGEN):.0f}",
+        "Faction du Primogène",
+        f"{faction_influence(state, player_clan, ClanFactionSide.PRIMOGEN):.0f}",
     )
     opposition_col.metric(
-        "Opposition",
-        f"{coterie_influence(state, player_clan, CoterieSide.OPPOSITION):.0f}",
+        "Faction d'opposition",
+        f"{faction_influence(state, player_clan, ClanFactionSide.OPPOSITION):.0f}",
     )
     opposition_leader = state.characters[own_clan_state.opposition_leader_id]
     ally_id = own_clan_state.opposition_allied_primogen_id
@@ -556,15 +650,15 @@ with clan_tab:
     if ally_id:
         st.caption(f"Allié extérieur actuel de l'opposition : {state.characters[ally_id].name}")
 
-    for side in (CoterieSide.PRIMOGEN, CoterieSide.OPPOSITION):
-        st.markdown(f"### {COTERIE_LABELS[side]}")
+    for side in (ClanFactionSide.PRIMOGEN, ClanFactionSide.OPPOSITION):
+        st.markdown(f"### {FACTION_LABELS[side]}")
         members = sorted(
             [
                 character
                 for character in state.characters.values()
                 if character.clan_id == player_clan
                 and character.id != state.prince_id
-                and own_clan_state.coterie_memberships.get(character.id) == side
+                and own_clan_state.faction_memberships.get(character.id) == side
             ],
             key=lambda character: character.personal_influence,
             reverse=True,
@@ -580,13 +674,16 @@ with clan_tab:
             effective = effective_relation_to_primogen(state, member.id)
             with st.expander(f"{member.name} — {role} — influence {member.personal_influence:.0f}"):
                 st.caption(
-                    f"Humanité {member.humanity_axis.value} · Traditions {member.tradition_axis.value} · "
+                    f"{political_profile(member)} · Humanité réelle {member.humanity}/10 · "
                     f"Rang de Sang : {BLOOD_RANK_LABELS[member.blood_rank.value]}"
                 )
-                relation_col, ideology_col, effective_col = st.columns(3)
+                relation_col, ideology_col, effective_col, status_col = st.columns(4)
                 relation_col.metric("Relation personnelle", f"{member.relation_to_primogen}/2")
-                ideology_col.metric("Mod. idéologique", f"{modifier:+d}")
+                ideology_col.metric("Affinité politique", f"{modifier:+d}")
                 effective_col.metric("Relation effective", f"{effective:+d}")
+                status_col.metric("Statut", f"{member.status}/5")
+                st.write(f"**Réputation :** {member.reputation:+d}")
+                st.write(f"**Ambition actuelle :** {member.political_ambition.value}")
                 physical_col, social_col, mental_col = st.columns(3)
                 physical_col.metric("Physique", member.physical)
                 social_col.metric("Social", member.social)
@@ -594,6 +691,60 @@ with clan_tab:
                 st.write("**Expertises :** " + (" · ".join(member.expertises) if member.expertises else "Aucune"))
                 st.write("**Disciplines :** " + format_score_map(member.disciplines, DISCIPLINE_LABELS))
                 st.write("**Historiques :** " + format_score_map(member.backgrounds))
+
+    st.markdown("### Griefs connus dans votre clan")
+    own_grievances = [
+        grievance
+        for grievance in state.grievances.values()
+        if not grievance.resolved
+        and state.characters[grievance.owner_id].clan_id == player_clan
+    ]
+    if not own_grievances:
+        st.caption("Aucun grief explicite actuellement enregistré.")
+    for grievance in own_grievances:
+        owner = state.characters[grievance.owner_id]
+        target = state.characters[grievance.target_id]
+        st.write(
+            f"**{owner.name} → {target.name}** · gravité {grievance.severity}/3 — {grievance.reason}"
+        )
+
+    st.markdown("### Promesses")
+    own_promises = [
+        promise
+        for promise in state.promises.values()
+        if state.characters[promise.promisor_id].clan_id == player_clan
+        or state.characters[promise.beneficiary_id].clan_id == player_clan
+    ]
+    if not own_promises:
+        st.caption("Aucune promesse politique enregistrée.")
+    for promise in own_promises:
+        st.write(
+            f"**{state.characters[promise.promisor_id].name} → {state.characters[promise.beneficiary_id].name}** "
+            f"· {promise.status.value} · échéance nuit {promise.due_night} — {promise.description}"
+        )
+
+with prestation_tab:
+    st.subheader("Prestation — faveurs et dettes")
+    st.caption(
+        "Les faveurs sont des obligations personnelles. Les honorer renforce la réputation ; les refuser "
+        "peut créer un grief et coûter lourdement en crédibilité."
+    )
+    relevant_boons = [
+        boon
+        for boon in state.boons.values()
+        if state.characters[boon.creditor_id].clan_id == player_clan
+        or state.characters[boon.debtor_id].clan_id == player_clan
+    ]
+    if not relevant_boons:
+        st.caption("Aucune faveur enregistrée pour votre clan.")
+    for boon in relevant_boons:
+        creditor = state.characters[boon.creditor_id]
+        debtor = state.characters[boon.debtor_id]
+        with st.container(border=True):
+            st.write(
+                f"**{creditor.name} ← {debtor.name}** · faveur {boon.level.value} · {boon.status.value}"
+            )
+            st.caption(f"Origine : {boon.origin} · créée nuit {boon.created_night}")
 
 with city_tab:
     st.subheader("Informations publiques")
@@ -605,8 +756,8 @@ with city_tab:
     for clan_id, clan_state in state.clan_states.items():
         primogen = state.characters[clan_state.clan.primogen_id]
         st.write(
-            f"**{clan_state.clan.name}** : {primogen.name} — "
-            f"Humanité {primogen.humanity_axis.value} / Traditions {primogen.tradition_axis.value}"
+            f"**{clan_state.clan.name}** : {primogen.name} — {political_profile(primogen)} — "
+            f"Statut {primogen.status}/5"
         )
 
     st.markdown("#### Renseignements de votre clan")
@@ -624,12 +775,15 @@ with city_tab:
         st.write(line)
         if level >= 2:
             target_state = state.clan_states[character.clan_id]
-            side = target_state.coterie_memberships.get(character.id, CoterieSide.PRIMOGEN)
+            side = target_state.faction_memberships.get(character.id, ClanFactionSide.PRIMOGEN)
             st.caption(
-                f"Coterie : {COTERIE_LABELS[side]} · relation effective au Primogène : "
+                f"Faction : {FACTION_LABELS[side]} · relation effective au Primogène : "
                 f"{effective_relation_to_primogen(state, character.id):+d} · influence {character.personal_influence:.0f}"
             )
-    st.caption("Les autres membres, relations, coteries et ordres restent privés tant qu'ils ne sont pas découverts.")
+    st.caption(
+        "Les autres membres, relations, griefs, ambitions, factions et ordres restent privés tant qu'ils "
+        "ne sont pas découverts."
+    )
 
 with elysium_tab:
     st.subheader("Elysium")
@@ -661,6 +815,6 @@ with reports_tab:
                 st.write(f"- {item}")
 
 st.caption(
-    "V0.8 : deux coteries par clan, relation personnelle au Primogène, une action par vampire, "
-    "diplomatie idéologique, recrutement, débauchage et renseignement progressif."
+    "V0.9 : factions internes, rapport aux mortels / à l'ordre, Humanité séparée, Statut, Prestation, "
+    "griefs, requêtes au Primogène et réactions autonomes explicables."
 )

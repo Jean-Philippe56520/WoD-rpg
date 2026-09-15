@@ -2,31 +2,33 @@ from __future__ import annotations
 
 from .character_rules import attribute_value, has_expertise
 from .config import DEFAULT_RULES, GameRules
-from .coteries import (
+from .factions import (
     effective_relation_to_primogen,
     ideology_relation_modifier,
-    initialize_coteries,
-    set_coterie_side,
+    initialize_factions,
+    set_faction_side,
 )
 from .models import (
     ActionType,
     Character,
     CharacterAttribute,
-    CoterieSide,
+    ClanFactionSide,
     GameAction,
     GameEvent,
     GameState,
 )
+from .social_politics import call_boon
 
 
 ACTION_LABELS = {
     ActionType.BUILD_INFLUENCE: "Développer son influence",
     ActionType.DIPLOMACY: "Diplomatie",
     ActionType.CONSOLIDATE_RELATION: "Consolider une relation",
-    ActionType.RECRUIT: "Recruter dans sa coterie",
+    ActionType.RECRUIT: "Recruter dans sa faction",
     ActionType.UNDERMINE: "Fragiliser un membre",
     ActionType.POACH: "Débaucher vers l'opposition",
     ActionType.INVESTIGATE: "Enquêter",
+    ActionType.CALL_BOON: "Réclamer une faveur",
     ActionType.CONSOLIDATE: "Consolider le courant du Primogène (legacy)",
     ActionType.RALLY_OPPOSITION: "Rallier un courant rival (legacy)",
 }
@@ -133,10 +135,10 @@ def _investigation_target(state: GameState, action: GameAction) -> Character:
 
 def _opposition_accepts(state: GameState, action: GameAction, actor: Character) -> bool:
     clan_state = state.clan_states[action.clan_id]
-    side = clan_state.coterie_memberships.get(actor.id, CoterieSide.PRIMOGEN)
-    if side != CoterieSide.OPPOSITION:
+    side = clan_state.faction_memberships.get(actor.id, ClanFactionSide.PRIMOGEN)
+    if side != ClanFactionSide.OPPOSITION:
         return True
-    if action.action_type == ActionType.BUILD_INFLUENCE:
+    if action.action_type in {ActionType.BUILD_INFLUENCE, ActionType.CALL_BOON}:
         return True
 
     relation = effective_relation_to_primogen(state, actor.id)
@@ -179,7 +181,7 @@ def apply_action(
     if action.clan_id not in state.clan_states:
         raise ValueError(f"Unknown clan: {action.clan_id}")
 
-    initialize_coteries(state)
+    initialize_factions(state)
     clan_state = state.clan_states[action.clan_id]
     clan = clan_state.clan
     actor = _resolve_actor(state, action)
@@ -222,7 +224,7 @@ def apply_action(
         message = (
             f"{actor.name} négocie avec {target.name} : relation {clan.name}/"
             f"{state.clan_states[target_clan_id].clan.name} +{gain:.0f} "
-            f"(affinité idéologique {affinity:+d})."
+            f"(affinité politique {affinity:+d})."
         )
 
     elif action.action_type == ActionType.CONSOLIDATE_RELATION:
@@ -239,7 +241,7 @@ def apply_action(
         ) + affinity
         difficulty = rules.relation_action_threshold + (
             1
-            if clan_state.coterie_memberships.get(target.id) == CoterieSide.OPPOSITION
+            if clan_state.faction_memberships.get(target.id) == ClanFactionSide.OPPOSITION
             else 0
         )
         if score >= difficulty:
@@ -256,10 +258,10 @@ def apply_action(
         target = _resolve_target_character(state, action)
         if target.clan_id != action.clan_id or target.id == clan.primogen_id:
             raise ValueError("Recruitment must target another member of the acting clan")
-        actor_side = clan_state.coterie_memberships.get(actor.id, CoterieSide.PRIMOGEN)
-        target_side = clan_state.coterie_memberships.get(target.id, CoterieSide.PRIMOGEN)
+        actor_side = clan_state.faction_memberships.get(actor.id, ClanFactionSide.PRIMOGEN)
+        target_side = clan_state.faction_memberships.get(target.id, ClanFactionSide.PRIMOGEN)
         if actor_side == target_side:
-            raise ValueError("Recruitment requires a member of the other coterie")
+            raise ValueError("Recruitment requires a member of the other faction")
         target_relation = effective_relation_to_primogen(state, target.id)
         affinity = ideology_relation_modifier(actor, target)
         score = _political_score(
@@ -271,14 +273,14 @@ def apply_action(
         ) + affinity
         difficulty = (
             rules.recruit_base_difficulty - target_relation
-            if actor_side == CoterieSide.PRIMOGEN
+            if actor_side == ClanFactionSide.PRIMOGEN
             else rules.recruit_base_difficulty - 1 + target_relation
         )
         if score >= difficulty:
-            set_coterie_side(state, target.id, actor_side)
-            message = f"{actor.name} rallie {target.name} à la coterie {actor_side.value}."
+            set_faction_side(state, target.id, actor_side)
+            message = f"{actor.name} rallie {target.name} à la faction {actor_side.value}."
         else:
-            message = f"{actor.name} tente de rallier {target.name}, qui reste dans sa coterie."
+            message = f"{actor.name} tente de rallier {target.name}, qui reste dans sa faction."
 
     elif action.action_type == ActionType.UNDERMINE:
         target = _resolve_target_character(state, action)
@@ -310,7 +312,7 @@ def apply_action(
         if not target.clan_id or target.id == state.clan_states[target.clan_id].clan.primogen_id:
             raise ValueError("Poaching must target a non-Primogen clan member")
         target_state = state.clan_states[target.clan_id]
-        if target_state.coterie_memberships.get(target.id) == CoterieSide.OPPOSITION:
+        if target_state.faction_memberships.get(target.id) == ClanFactionSide.OPPOSITION:
             raise ValueError("Target already belongs to the opposition")
         if effective_relation_to_primogen(state, target.id) > 0:
             raise ValueError("Target is not politically fragile enough to be poached")
@@ -323,7 +325,7 @@ def apply_action(
             disciplines=("presence", "domination"),
         ) + affinity
         if score >= rules.poach_base_difficulty:
-            set_coterie_side(state, target.id, CoterieSide.OPPOSITION)
+            set_faction_side(state, target.id, ClanFactionSide.OPPOSITION)
             actor.relations[target.id] = _clamp_int(actor.relations.get(target.id, 0) + 1)
             message = f"{actor.name} convainc {target.name} de rejoindre l'opposition de son clan."
         else:
@@ -350,6 +352,26 @@ def apply_action(
             )
         else:
             message = f"{actor.name} enquête sur le réseau de {target.clan_id}, sans information exploitable."
+
+    elif action.action_type == ActionType.CALL_BOON:
+        target = _resolve_target_character(state, action)
+        due = sorted(
+            (
+                boon
+                for boon in state.boons.values()
+                if boon.creditor_id == actor.id
+                and boon.debtor_id == target.id
+                and boon.status.value == "due"
+            ),
+            key=lambda boon: (boon.created_night, boon.id),
+        )
+        if not due:
+            raise ValueError("No due boon exists between this creditor and debtor")
+        boon = call_boon(state, due[0].id, actor.id)
+        message = (
+            f"{actor.name} réclame à {target.name} une faveur {boon.level.value} "
+            f"issue de : {boon.origin}."
+        )
 
     elif action.action_type == ActionType.CONSOLIDATE:
         actor.personal_influence += rules.consolidate_influence_gain

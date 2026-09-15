@@ -7,20 +7,34 @@ from .models import (
     ActionType,
     AxisPolarity,
     BloodRank,
+    Boon,
+    BoonLevel,
+    BoonStatus,
     Character,
     Clan,
+    ClanFactionSide,
     ClanNightOrders,
     ClanNightReport,
     ClanPoliticalState,
-    CoterieSide,
     EmbracePetitionOrder,
     EmbraceRequest,
     EmbraceStatus,
     GameAction,
     GameEvent,
     GameState,
+    Grievance,
+    MortalStance,
+    OrderStance,
+    PoliticalAmbition,
+    PoliticalPromise,
+    PoliticalRequest,
+    PoliticalRequestDecisionOrder,
+    PoliticalRequestStatus,
+    PoliticalRequestType,
     PrimogenPosition,
     PrimogenVote,
+    PromiseStatus,
+    RequestDecision,
 )
 
 
@@ -30,8 +44,12 @@ def _character_to_dict(character: Character) -> dict:
         "name": character.name,
         "clan_id": character.clan_id,
         "personal_influence": character.personal_influence,
-        "humanity_axis": character.humanity_axis.value,
-        "tradition_axis": character.tradition_axis.value,
+        "mortal_stance": character.mortal_stance.value,
+        "order_stance": character.order_stance.value,
+        "humanity": character.humanity,
+        "status": character.status,
+        "reputation": character.reputation,
+        "political_ambition": character.political_ambition.value,
         "physical": character.physical,
         "social": character.social,
         "mental": character.mental,
@@ -47,11 +65,29 @@ def _character_to_dict(character: Character) -> dict:
     }
 
 
-def _legacy_axis(value: dict, new_key: str, old_key: str) -> AxisPolarity:
+def _legacy_polarity(value: dict, new_key: str, old_key: str) -> AxisPolarity:
     if new_key in value:
         return AxisPolarity(value[new_key])
     legacy_value = float(value.get(old_key, 0.0))
     return AxisPolarity.PLUS if legacy_value >= 0 else AxisPolarity.MINUS
+
+
+def _mortal_stance(value: dict, default_sheet: Character | None) -> MortalStance:
+    if "mortal_stance" in value:
+        return MortalStance(value["mortal_stance"])
+    if "humanity_axis" in value or "humanism" in value:
+        polarity = _legacy_polarity(value, "humanity_axis", "humanism")
+        return MortalStance.HUMANIST if polarity == AxisPolarity.PLUS else MortalStance.PREDATORY
+    return default_sheet.mortal_stance if default_sheet else MortalStance.HUMANIST
+
+
+def _order_stance(value: dict, default_sheet: Character | None) -> OrderStance:
+    if "order_stance" in value:
+        return OrderStance(value["order_stance"])
+    if "tradition_axis" in value or "tradition" in value:
+        polarity = _legacy_polarity(value, "tradition_axis", "tradition")
+        return OrderStance.ORTHODOX if polarity == AxisPolarity.PLUS else OrderStance.REFORMIST
+    return default_sheet.order_stance if default_sheet else OrderStance.ORTHODOX
 
 
 def _legacy_relation_to_primogen(value: dict, default_sheet: Character | None) -> int:
@@ -76,31 +112,45 @@ def _character_from_dict(value: dict, default_sheet: Character | None = None) ->
     blood_rank_default = default_sheet.blood_rank if default_sheet else BloodRank.NEWBORN
     background_default = default_sheet.backgrounds if default_sheet else {}
     relations_default = default_sheet.relations if default_sheet else {}
+    humanity_default = default_sheet.humanity if default_sheet else 7
+    status_default = default_sheet.status if default_sheet else 1
+    reputation_default = default_sheet.reputation if default_sheet else 0
+    political_ambition_default = (
+        default_sheet.political_ambition
+        if default_sheet
+        else PoliticalAmbition.INCREASE_INFLUENCE
+    )
+
+    humanity_value = value.get("humanity", humanity_default)
+    try:
+        humanity_value = int(humanity_value)
+    except (TypeError, ValueError):
+        humanity_value = humanity_default
+    if not 0 <= humanity_value <= 10:
+        humanity_value = humanity_default
 
     return Character(
         id=value["id"],
         name=value["name"],
         clan_id=value.get("clan_id"),
         personal_influence=float(value.get("personal_influence", 0.0)),
-        humanity_axis=_legacy_axis(value, "humanity_axis", "humanism"),
-        tradition_axis=_legacy_axis(value, "tradition_axis", "tradition"),
+        mortal_stance=_mortal_stance(value, default_sheet),
+        order_stance=_order_stance(value, default_sheet),
+        humanity=humanity_value,
+        status=int(value.get("status", status_default)),
+        reputation=int(value.get("reputation", reputation_default)),
+        political_ambition=PoliticalAmbition(
+            value.get("political_ambition", political_ambition_default.value)
+        ),
         physical=int(value.get("physical", physical_default)),
         social=int(value.get("social", social_default)),
         mental=int(value.get("mental", mental_default)),
         expertises=tuple(value.get("expertises", expertise_default)),
-        disciplines={
-            k: int(v)
-            for k, v in value.get("disciplines", discipline_default).items()
-        },
+        disciplines={k: int(v) for k, v in value.get("disciplines", discipline_default).items()},
         blood_rank=BloodRank(value.get("blood_rank", blood_rank_default.value)),
-        backgrounds={
-            k: int(v)
-            for k, v in value.get("backgrounds", background_default).items()
-        },
+        backgrounds={k: int(v) for k, v in value.get("backgrounds", background_default).items()},
         relation_to_primogen=_legacy_relation_to_primogen(value, default_sheet),
-        relations={
-            k: int(v) for k, v in value.get("relations", relations_default).items()
-        },
+        relations={k: int(v) for k, v in value.get("relations", relations_default).items()},
         loyalty=float(value.get("loyalty", 50.0)),
         ambition=float(value.get("ambition", 50.0)),
         is_primogen=bool(value.get("is_primogen", False)),
@@ -120,9 +170,9 @@ def game_state_to_dict(state: GameState) -> dict:
         "clan_states": {
             key: {
                 "clan": asdict(value.clan),
-                "coterie_memberships": {
-                    character_id: CoterieSide(side).value
-                    for character_id, side in value.coterie_memberships.items()
+                "faction_memberships": {
+                    character_id: ClanFactionSide(side).value
+                    for character_id, side in value.faction_memberships.items()
                 },
                 "opposition_leader_id": value.opposition_leader_id,
                 "opposition_allied_primogen_id": value.opposition_allied_primogen_id,
@@ -147,6 +197,53 @@ def game_state_to_dict(state: GameState) -> dict:
             }
             for key, value in state.embrace_requests.items()
         },
+        "boons": {
+            key: {
+                "id": value.id,
+                "creditor_id": value.creditor_id,
+                "debtor_id": value.debtor_id,
+                "level": value.level.value,
+                "origin": value.origin,
+                "created_night": value.created_night,
+                "status": value.status.value,
+                "public": value.public,
+                "called_night": value.called_night,
+                "resolved_night": value.resolved_night,
+            }
+            for key, value in state.boons.items()
+        },
+        "grievances": {key: asdict(value) for key, value in state.grievances.items()},
+        "political_requests": {
+            key: {
+                "id": value.id,
+                "clan_id": value.clan_id,
+                "requester_id": value.requester_id,
+                "request_type": value.request_type.value,
+                "description": value.description,
+                "created_night": value.created_night,
+                "target_id": value.target_id,
+                "offered_boon_level": (
+                    value.offered_boon_level.value if value.offered_boon_level else None
+                ),
+                "status": value.status.value,
+                "response_night": value.response_night,
+            }
+            for key, value in state.political_requests.items()
+        },
+        "promises": {
+            key: {
+                "id": value.id,
+                "promisor_id": value.promisor_id,
+                "beneficiary_id": value.beneficiary_id,
+                "description": value.description,
+                "created_night": value.created_night,
+                "due_night": value.due_night,
+                "request_id": value.request_id,
+                "status": value.status.value,
+                "resolved_night": value.resolved_night,
+            }
+            for key, value in state.promises.items()
+        },
         "events": [
             {
                 "night": event.night,
@@ -162,15 +259,20 @@ def game_state_to_dict(state: GameState) -> dict:
 def game_state_from_dict(data: dict) -> GameState:
     character_payloads = data.get("characters", {})
     defaults: dict[str, Character] = {}
-    if any(
-        "physical" not in value
-        or "expertises" not in value
-        or "disciplines" not in value
-        or "blood_rank" not in value
-        or "backgrounds" not in value
-        or "relation_to_primogen" not in value
-        for value in character_payloads.values()
-    ):
+    new_sheet_fields = {
+        "physical",
+        "expertises",
+        "disciplines",
+        "blood_rank",
+        "backgrounds",
+        "relation_to_primogen",
+        "mortal_stance",
+        "order_stance",
+        "status",
+        "reputation",
+        "political_ambition",
+    }
+    if any(not new_sheet_fields.issubset(value) for value in character_payloads.values()):
         from .world import seed_characters
 
         defaults = seed_characters()
@@ -179,12 +281,14 @@ def game_state_from_dict(data: dict) -> GameState:
         key: _character_from_dict(value, defaults.get(key))
         for key, value in character_payloads.items()
     }
-    clan_states = {
-        key: ClanPoliticalState(
+    clan_states = {}
+    for key, value in data.get("clan_states", {}).items():
+        raw_memberships = value.get("faction_memberships", value.get("coterie_memberships", {}))
+        clan_states[key] = ClanPoliticalState(
             clan=Clan(**value["clan"]),
-            coterie_memberships={
-                character_id: CoterieSide(side)
-                for character_id, side in value.get("coterie_memberships", {}).items()
+            faction_memberships={
+                character_id: ClanFactionSide(side)
+                for character_id, side in raw_memberships.items()
             },
             opposition_leader_id=value.get("opposition_leader_id"),
             opposition_allied_primogen_id=value.get("opposition_allied_primogen_id"),
@@ -197,8 +301,7 @@ def game_state_from_dict(data: dict) -> GameState:
             },
             current_allies=dict(value.get("current_allies", {})),
         )
-        for key, value in data.get("clan_states", {}).items()
-    }
+
     embrace_requests = {
         key: EmbraceRequest(
             id=value["id"],
@@ -212,6 +315,66 @@ def game_state_from_dict(data: dict) -> GameState:
             decision_night=value.get("decision_night"),
         )
         for key, value in data.get("embrace_requests", {}).items()
+    }
+    boons = {
+        key: Boon(
+            id=value["id"],
+            creditor_id=value["creditor_id"],
+            debtor_id=value["debtor_id"],
+            level=BoonLevel(value["level"]),
+            origin=value.get("origin", "Prestation"),
+            created_night=int(value["created_night"]),
+            status=BoonStatus(value.get("status", BoonStatus.DUE.value)),
+            public=bool(value.get("public", False)),
+            called_night=value.get("called_night"),
+            resolved_night=value.get("resolved_night"),
+        )
+        for key, value in data.get("boons", {}).items()
+    }
+    grievances = {
+        key: Grievance(
+            id=value["id"],
+            owner_id=value["owner_id"],
+            target_id=value["target_id"],
+            reason=value["reason"],
+            severity=int(value["severity"]),
+            created_night=int(value["created_night"]),
+            resolved=bool(value.get("resolved", False)),
+        )
+        for key, value in data.get("grievances", {}).items()
+    }
+    political_requests = {
+        key: PoliticalRequest(
+            id=value["id"],
+            clan_id=value["clan_id"],
+            requester_id=value["requester_id"],
+            request_type=PoliticalRequestType(value["request_type"]),
+            description=value["description"],
+            created_night=int(value["created_night"]),
+            target_id=value.get("target_id"),
+            offered_boon_level=(
+                BoonLevel(value["offered_boon_level"])
+                if value.get("offered_boon_level")
+                else None
+            ),
+            status=PoliticalRequestStatus(value.get("status", PoliticalRequestStatus.OPEN.value)),
+            response_night=value.get("response_night"),
+        )
+        for key, value in data.get("political_requests", {}).items()
+    }
+    promises = {
+        key: PoliticalPromise(
+            id=value["id"],
+            promisor_id=value["promisor_id"],
+            beneficiary_id=value["beneficiary_id"],
+            description=value["description"],
+            created_night=int(value["created_night"]),
+            due_night=int(value["due_night"]),
+            request_id=value.get("request_id"),
+            status=PromiseStatus(value.get("status", PromiseStatus.PENDING.value)),
+            resolved_night=value.get("resolved_night"),
+        )
+        for key, value in data.get("promises", {}).items()
     }
     events = [
         GameEvent(
@@ -237,11 +400,17 @@ def game_state_from_dict(data: dict) -> GameState:
         characters=characters,
         clan_states=clan_states,
         embrace_requests=embrace_requests,
+        boons=boons,
+        grievances=grievances,
+        political_requests=political_requests,
+        promises=promises,
         events=events,
     )
-    from .coteries import initialize_coteries
+    from .factions import initialize_factions
+    from .social_politics import generate_requests_for_night
 
-    initialize_coteries(state)
+    initialize_factions(state)
+    generate_requests_for_night(state)
     return state
 
 
@@ -277,6 +446,10 @@ def clan_orders_to_dict(orders: ClanNightOrders) -> dict:
             else None
         ),
         "embrace_petitions": [asdict(petition) for petition in orders.embrace_petitions],
+        "request_decisions": [
+            {"request_id": item.request_id, "decision": item.decision.value}
+            for item in orders.request_decisions
+        ],
     }
 
 
@@ -305,6 +478,13 @@ def clan_orders_from_dict(data: dict) -> ClanNightOrders:
         embrace_petitions=tuple(
             EmbracePetitionOrder(**petition)
             for petition in data.get("embrace_petitions", [])
+        ),
+        request_decisions=tuple(
+            PoliticalRequestDecisionOrder(
+                request_id=item["request_id"],
+                decision=RequestDecision(item["decision"]),
+            )
+            for item in data.get("request_decisions", [])
         ),
         version=int(data.get("version", 1)),
     )

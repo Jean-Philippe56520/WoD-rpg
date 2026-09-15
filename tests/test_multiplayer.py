@@ -1,6 +1,14 @@
 import pytest
 
-from game.models import ActionType, ClanNightOrders, GameAction, PrimogenVote
+from game.models import (
+    ActionType,
+    ClanNightOrders,
+    GameAction,
+    PoliticalRequestDecisionOrder,
+    PoliticalRequestStatus,
+    PrimogenVote,
+    RequestDecision,
+)
 from game.multiplayer import DEFAULT_GAME_ID, MultiplayerGameService
 from game.persistence import SQLiteGameRepository
 from game.world import REQUIRED_CLANS
@@ -42,6 +50,37 @@ def v08_orders_for(state, clan_id):
         ),
         vote=PrimogenVote(primogen_id, primogen_id),
         version=2,
+    )
+
+
+def v09_orders_for(state, clan_id):
+    primogen_id = state.clan_states[clan_id].clan.primogen_id
+    members = [
+        character
+        for character in state.characters.values()
+        if character.clan_id == clan_id and character.id != state.prince_id
+    ]
+    open_requests = [
+        request
+        for request in state.political_requests.values()
+        if request.clan_id == clan_id and request.status == PoliticalRequestStatus.OPEN
+    ]
+    return ClanNightOrders(
+        clan_id=clan_id,
+        actions=tuple(
+            GameAction(
+                clan_id,
+                ActionType.BUILD_INFLUENCE,
+                actor_character_id=member.id,
+            )
+            for member in members
+        ),
+        vote=PrimogenVote(primogen_id, primogen_id),
+        request_decisions=tuple(
+            PoliticalRequestDecisionOrder(request.id, RequestDecision.ACCEPT)
+            for request in open_requests
+        ),
+        version=3,
     )
 
 
@@ -126,6 +165,45 @@ def test_mixed_v07_and_v08_submissions_can_finish_same_persisted_night(tmp_path)
     assert service.submit_orders("p2", v08_orders_for(state, "toreador")) is False
     assert service.submit_orders("p3", v08_orders_for(state, "brujah")) is True
     assert repo.get_game_info(DEFAULT_GAME_ID)["current_night"] == 2
+
+
+def test_live_style_legacy_ventrue_can_resolve_with_v09_other_clans(tmp_path):
+    service, repo = make_service(tmp_path)
+    state = repo.get_game_state(DEFAULT_GAME_ID)
+    players = (("p1", "Alice", "ventrue"), ("p2", "Bob", "toreador"), ("p3", "Cara", "brujah"))
+    for player_id, name, clan_id in players:
+        service.claim_clan(player_id, name, clan_id)
+
+    legacy_ventrue = ClanNightOrders(
+        clan_id="ventrue",
+        actions=(
+            GameAction("ventrue", ActionType.CONSOLIDATE),
+            GameAction("ventrue", ActionType.BUILD_INFLUENCE),
+        ),
+        vote=PrimogenVote("primogen_ventrue", "primogen_ventrue"),
+        version=1,
+    )
+    assert service.submit_orders("p1", legacy_ventrue) is False
+    assert service.submit_orders("p2", v09_orders_for(state, "toreador")) is False
+    assert service.submit_orders("p3", v09_orders_for(state, "brujah")) is True
+    assert repo.get_game_info(DEFAULT_GAME_ID)["current_night"] == 2
+    assert repo.get_report(DEFAULT_GAME_ID, 1, "ventrue") is not None
+
+
+def test_v09_requires_a_decision_for_each_open_clan_request(tmp_path):
+    service, repo = make_service(tmp_path)
+    service.claim_clan("p1", "Alice", "ventrue")
+    state = repo.get_game_state(DEFAULT_GAME_ID)
+    orders = v09_orders_for(state, "ventrue")
+    incomplete = ClanNightOrders(
+        clan_id=orders.clan_id,
+        actions=orders.actions,
+        vote=orders.vote,
+        request_decisions=(),
+        version=3,
+    )
+    with pytest.raises(ValueError, match="Every open political request"):
+        service.submit_orders("p1", incomplete)
 
 
 def test_reports_hide_other_clans_private_member_actions(tmp_path):
