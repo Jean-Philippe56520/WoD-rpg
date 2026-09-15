@@ -5,11 +5,12 @@ from typing import Any
 
 from .chronicle import ChronicleProgress
 from .chronicle_politics import validate_political_state
-from .chronicle_simulation import SimulationBeat, advance_simulation
+from .chronicle_simulation import SimulationBeat
 from .chronicle_simulation_store import ChronicleSimulationStore
 from .chronicle_store import ChronicleStore
 from .chronicle_world_store import ChronicleWorldStore
 from .era import era_for_year, milestones_crossed
+from .paris_simulation import advance_paris_simulation
 
 
 @dataclass(frozen=True)
@@ -34,7 +35,7 @@ class ChronicleService:
             raise ValueError("All active characters must be ready for convergence")
 
         simulation = self.simulation_store.ensure(game_id, year=progress.year)
-        advanced, beats = advance_simulation(
+        advanced, beats = advance_paris_simulation(
             simulation,
             year=progress.year,
             chapter=progress.chapter,
