@@ -14,11 +14,11 @@ Le personnage peut devenir influent, obtenir un Domaine, accumuler des faveurs, 
 
 Le cœur du jeu reste : **pouvoir, information, relations, Prestation, influence, territoire et conséquences persistantes**.
 
-## Point de départ
+## Point de départ : Paris, 1435
 
-La Chronique commence en **1435**.
+La Chronique commence à **Paris en 1435**.
 
-Le personnage est un vampire jeune :
+Le personnage est :
 
 - récemment Étreint ;
 - sous la responsabilité de son sire ;
@@ -27,13 +27,82 @@ Le personnage est un vampire jeune :
 - dépendant d'autrui pour son premier droit de chasse ;
 - plongé dans une société vampirique qui existait avant lui et continue d'agir sans lui.
 
-Les clans jouables initiaux restent :
+Le Paris vampirique de départ est désormais ancré dans une continuité historique et caïnite documentée. Alexandre est le Prince de référence en 1435 ; les Toréador, les anciens Ventrue, les mouvements anarchs et la Cour des Miracles forment des rapports de force qui peuvent ensuite évoluer différemment selon la partie.
 
-- Brujah ;
-- Toreador ;
-- Ventrue.
+Les clans jouables initiaux restent : Brujah, Toréador et Ventrue. Le joueur contrôle uniquement son vampire, jamais son clan.
 
-Le clan détermine le Sang, les Disciplines, le Fléau et certains accès ou situations, mais le joueur ne contrôle pas les autres membres de son clan.
+## Paris by Night comme source récurrente
+
+Le wiki **Paris by Night** (`https://parisbynight.quelquesmots.fr/`) est enregistré comme source majeure et récurrente pour la continuité parisienne.
+
+Il n'est pas recopié ni traité comme un canon aveugle. Chaque personnage ou événement important doit être recoupé entre fiche individuelle, lignée, chronologie, pages de règne et éventuelles sources officielles citées.
+
+Le registre détaillé se trouve dans `docs/lore/PARIS_BY_NIGHT.md` et le catalogue machine dans `game/lore_sources.py`.
+
+Les niveaux de provenance sont :
+
+- **A** : source WoD officielle identifiée ou explicitement signalée ;
+- **B** : continuité Paris by Night / Kaotic enrichie ;
+- **C** : déduction WoD-rpg à partir de plusieurs sources ;
+- **D** : création propre à WoD-rpg nécessaire à la simulation.
+
+Une règle est impérative : **un statut moderne n'est jamais projeté automatiquement vers 1435**. François Villon est par exemple déjà un ancien Toréador en 1435, mais il n'est pas encore Prince de Paris.
+
+## V0.43 — Paris vivant
+
+V0.43 introduit le premier seed historique de Paris 1435 et la première couche de société caïnite réellement autonome.
+
+Le roster initial audité comprend notamment :
+
+- Alexandre ;
+- Saviarre ;
+- Béatrix ;
+- François Villon ;
+- Violetta ;
+- Magnerius de Sens ;
+- Henri le Preux ;
+- Pierre Emmanuel de Pompignan.
+
+Les données séparent :
+
+1. l'identité durable d'un personnage ;
+2. son état et sa localisation en 1435 ;
+3. les interprétations mécaniques propres à WoD-rpg ;
+4. les événements futurs de référence.
+
+Henri le Preux est par exemple enregistré à Bourges en 1435 et n'agit donc pas comme s'il se trouvait physiquement à la Cour parisienne.
+
+Les événements futurs connus ne sont pas forcés. La destruction d'Alexandre en 1481 ou l'ascension future d'autres figures sont stockées comme **pressions historiques potentielles** avec des conditions et des divergences possibles. La simulation peut converger vers le canon ou s'en éloigner fortement.
+
+## Société autonome
+
+Lors d'une convergence, les PNJ locaux peuvent désormais agir les uns sur les autres et produire des mutations persistantes concrètes :
+
+- rapprochement et alliance ;
+- rivalité ;
+- modification de relation ;
+- création d'une Prestation ;
+- service politique ;
+- droit de chasse temporaire lorsqu'un acteur contrôle réellement un Domaine ;
+- progression d'agenda et influence ;
+- pression des chasseurs mortels sur les Domaines.
+
+Le monde ne se contente donc plus d'incrémenter un compteur abstrait. Le joueur arrive dans un réseau qui agit déjà sans lui.
+
+## Canon divergent
+
+L'histoire réelle et la continuité Vampire constituent des **conditions initiales et des pressions**, pas un scénario verrouillé.
+
+Le moteur ne doit jamais faire :
+
+```python
+if year == 1481:
+    kill_alexandre()
+```
+
+Il doit évaluer les rapports de force réellement produits par la partie : stabilité, relations, Prestations, rivalités, factions, Domaines, influence, secrets et interventions du PJ.
+
+Le principe cible est : **plus la Chronique avance, plus son Paris devient l'histoire propre de cette sauvegarde**.
 
 ## Création du vampire
 
@@ -52,8 +121,6 @@ Le personnage démarre sans fonction politique. Les offices sont des positions d
 
 ## Boucle de jeu
 
-La Chronique est organisée en nuits personnelles, segments et chapitres.
-
 ```text
 Situation de la nuit
         |
@@ -69,7 +136,7 @@ Fin du segment
         |
 Convergence solo : le monde agit
         |
-PNJ / Domaines / politique / événements
+PNJ / relations / Prestations / Domaines / politique
         |
 Segment suivant
         |
@@ -80,75 +147,26 @@ Progression + éventuelle ellipse historique
 
 Le joueur ne doit attendre aucun autre joueur pour faire avancer sa Chronique.
 
-## V0.42 — Chronique personnelle
+## Chronique personnelle
 
-Chaque compte possède désormais sa propre instance de Chronique persistante.
+Depuis V0.42, chaque compte possède sa propre instance de Chronique persistante.
 
-L'identifiant de partie est dérivé de manière déterministe du compte sans exposer directement son identifiant. Cela isole :
+L'identifiant de partie est dérivé de manière déterministe du compte sans exposer directement son identifiant. Cela isole personnage, chronologie, historique des nuits, simulation politique, Domaines, faveurs et événements.
 
-- personnage ;
-- chronologie ;
-- historique des nuits ;
-- simulation politique ;
-- Domaines ;
-- faveurs ;
-- événements du monde.
+Les anciennes sauvegardes V0.21–V0.41 stockées dans `chronicle_1435` sont migrées de manière non destructive vers une instance personnelle.
 
-Les anciennes sauvegardes V0.21–V0.41 stockées dans la Chronique partagée `chronicle_1435` sont migrées de manière non destructive vers une instance personnelle. L'ancienne sauvegarde reste intacte.
+V0.43 ajoute ensuite le seed Paris de manière idempotente :
 
-Lors de la migration, les références directes aux autres anciens PJ sont retirées, mais l'état persistant des PNJ, Domaines et institutions est conservé lorsque possible.
-
-Aucune migration SQL structurelle n'est nécessaire pour V0.42 : les tables Chronicle utilisent déjà `game_id` comme frontière de persistance.
-
-## Monde persistant
-
-Le monde contient des vampires PNJ avec notamment :
-
-- clan ;
-- rôle ;
-- ambition ;
-- objectif court terme ;
-- loyauté ;
-- agressivité ;
-- influence ;
-- Statut ;
-- attitude politique ;
-- progression d'agenda ;
-- relations persistantes.
-
-Les PNJ agissent lors des convergences. Le joueur n'est pas le centre mécanique du monde : il est un acteur parmi d'autres.
+- l'ancien Prince fictif par défaut est remplacé par Alexandre ;
+- une fonction politique déjà réellement modifiée par une partie n'est pas écrasée ;
+- un ancien PNJ encore référencé par une dette, un droit ou une ressource persistante est conservé pour éviter les références cassées ;
+- aucun changement de schéma Supabase n'est requis.
 
 ## Sire et émancipation
 
-Le sire est une relation structurante des premières nuits.
+Le sire structure les premières nuits par la protection, les introductions, l'accès initial à la chasse, les attentes et la responsabilité politique.
 
-Il apporte :
-
-- protection ;
-- introductions ;
-- accès initial à la chasse ;
-- attentes et obligations ;
-- responsabilité politique pour les actes de l'infant.
-
-Lorsque le personnage devient suffisamment autonome, il peut demander sa libération. Une émancipation réussie retire notamment le droit implicite de chasser sous la responsabilité du sire.
-
-## Faim et résolution
-
-Les situations utilisent le profil Vampire du personnage, les compétences, les attributs et les dés de Faim.
-
-Les résultats peuvent produire :
-
-- succès ;
-- succès critique ;
-- critique bestial ;
-- échec ;
-- échec bestial ;
-- progression ;
-- réputation ;
-- influence ;
-- modification de relations ou de ressources.
-
-La direction cible est de remplacer progressivement les effets génériques par des conséquences directement liées aux acteurs et ressources réels du monde.
+Lorsque le personnage devient suffisamment autonome, il peut chercher son émancipation. Une libération réussie modifie notamment son accès implicite à la chasse et sa position sociale.
 
 ## Domaines
 
@@ -164,102 +182,62 @@ Chaque Domaine utilise :
 
 Détenir un Domaine et disposer du droit d'y chasser restent deux choses distinctes.
 
-Un personnage peut devenir politiquement important sans posséder de Domaine.
-
 ## Prestation
 
-Les faveurs sont des obligations persistantes entre vampires.
+Les faveurs sont des obligations persistantes entre vampires. Les niveaux actuellement reconnus sont mineure, majeure et dette de vie.
 
-Les niveaux actuellement reconnus sont :
-
-- mineure ;
-- majeure ;
-- dette de vie.
-
-Elles possèdent un créancier, un débiteur, une origine, un statut et peuvent être publiques ou privées.
-
-À terme, la Prestation doit être un des principaux moteurs de progression politique plutôt qu'une simple monnaie abstraite.
+Elles possèdent un créancier, un débiteur, une origine, un statut et peuvent être publiques ou privées. V0.43 permet au monde autonome d'en créer entre PNJ.
 
 ## Politique et offices
 
 Le monde politique est stocké dans un état canonique commun aux PJ et PNJ.
 
-Les fonctions actuellement modélisées comprennent notamment :
+Les fonctions modélisées comprennent notamment détenteur de Domaine, représentant du clan, Primogène et Prince.
 
-- détenteur de Domaine ;
-- représentant du clan ;
-- Primogène ;
-- Prince.
-
-Prince et Primogène sont deux fonctions distinctes et ne peuvent pas être détenues simultanément par le même vampire.
-
-Les fonctions dépendent aussi de l'époque : le moteur ne suppose pas qu'une institution moderne existe déjà en 1435.
-
-Le joueur pourra accéder à ces fonctions uniquement si son parcours, le contexte et les rapports de force le permettent.
+Prince et Primogène sont distincts et ne peuvent pas être détenus simultanément par le même vampire. Les fonctions disponibles dépendent de l'époque ; le moteur ne suppose pas qu'une institution moderne existe déjà en 1435.
 
 ## Chronologie historique
 
-Le moteur est sensible à l'époque.
+Le moteur est sensible à l'époque et peut traverser Révolte Anarch, coalition proto-Camarilla, Camarilla institutionnelle, changements de pouvoirs mortels et pression accrue des chasseurs.
 
-Les chapitres peuvent produire des ellipses de plusieurs années et traverser des étapes historiques qui modifient progressivement :
-
-- institutions ;
-- rapports de pouvoir ;
-- Révolte Anarch ;
-- coalition proto-Camarilla ;
-- Camarilla institutionnelle ;
-- pression des chasseurs ;
-- fonctions politiques disponibles.
-
-L'histoire fournit un cadre, mais le monde local et le personnage conservent leurs conséquences propres.
+La direction V0.43 est de remplacer les jalons déterministes par des transitions conditionnelles lorsque le monde local peut raisonnablement diverger.
 
 ## Brouillard de guerre
 
-Le moteur possède déjà la notion d'intention cachée pour les actions autonomes du monde.
-
-La prochaine étape est d'en faire un véritable système d'information imparfaite : le personnage ne doit pas connaître automatiquement les ambitions, relations, dettes et projets secrets des PNJ.
+Le moteur possède déjà une notion d'intention cachée pour les actions autonomes. La cible suivante est un véritable système d'information imparfaite : rumeurs, sources, soupçons, secrets, ancienneté d'une information et degré de certitude.
 
 ## Atelier legacy
 
 L'application conserve un **Mode Atelier legacy (test/dev)** isolé de la Chronique de production.
 
-Il contient l'ancien moteur politique centré sur Brujah, Toreador et Ventrue et permet de basculer entre les clans sans authentification.
-
-Cet Atelier sert de banc de test et de réservoir de mécaniques historiques. Il ne définit plus la boucle principale du jeu et ne doit jamais écrire dans une Chronique personnelle de production.
+Il contient l'ancien moteur politique centré sur Brujah, Toréador et Ventrue. Il sert de banc de test et de réservoir de mécaniques historiques et ne doit jamais écrire dans une Chronique personnelle de production.
 
 ## Persistance
 
-GitHub contient :
-
-- code ;
-- configuration ;
-- contenus statiques ;
-- tests ;
-- schémas reproductibles.
-
-GitHub n'est jamais utilisé comme sauvegarde dynamique des parties.
+GitHub contient code, configuration, contenus statiques, lore structuré, tests et schémas reproductibles. GitHub n'est jamais utilisé comme sauvegarde dynamique des parties.
 
 La persistance de production utilise Supabase. SQLite reste utilisé pour les tests et l'exécution locale.
 
 ## Architecture principale
 
-- `game/chronicle.py` : personnage, progression et actions personnelles historiques ;
-- `game/chronicle_instance.py` : isolation d'une Chronique personnelle par compte et migration legacy ;
-- `game/chronicle_store.py` : persistance du personnage, nuits et progression ;
-- `game/chronicle_simulation.py` : PNJ, Domaines, faveurs, droits de chasse et simulation ;
+- `game/chronicle.py` : personnage, progression et actions personnelles ;
+- `game/chronicle_instance.py` : Chronique personnelle et migration legacy ;
+- `game/chronicle_store.py` : personnage, nuits et progression ;
+- `game/chronicle_simulation.py` : primitives génériques de PNJ, Domaines, Prestation et droits ;
+- `game/paris_lore.py` : seed historique Paris 1435, factions et futurs de référence ;
+- `game/lore_sources.py` : registre machine des sources et provenance ;
+- `game/paris_simulation.py` : adaptation Paris, migration idempotente et actions autonomes ;
 - `game/chronicle_simulation_store.py` : persistance de la simulation ;
 - `game/chronicle_politics.py` : état politique canonique PJ/PNJ ;
 - `game/chronicle_offices.py` : éligibilité aux fonctions ;
 - `game/chronicle_service.py` : convergence et progression du monde ;
-- `game/chronicle_world_store.py` : historique des événements du monde ;
+- `game/chronicle_world_store.py` : historique des événements ;
 - `game/situations.py` : situations jouables et résolutions ;
 - `game/vampire_profile.py` : fiche Vampire ;
-- `game/vampire_profile_store.py` : persistance de la fiche ;
 - `game/era.py` : règles et institutions selon l'époque ;
 - `game/chronicle_ui.py` : interface de la Chronique ;
+- `docs/lore/PARIS_BY_NIGHT.md` : protocole et audit permanent de Paris by Night ;
 - `app.py` : launcher, authentification et séparation Chronique / Atelier ;
-- `game/` historique : moteur politique legacy conservé pour l'Atelier ;
-- `supabase/chronicle_schema.sql` : schéma reproductible de la Chronique ;
 - `tests/` : tests automatisés.
 
 ## Tests
@@ -270,15 +248,16 @@ pytest -q
 
 La CI GitHub exécute la suite complète sur chaque pull request et chaque push vers `main`.
 
-## Priorités après V0.42
+## Priorités après V0.43
 
-1. enrichir les PNJ en véritable société vampirique autonome ;
-2. mémoire relationnelle persistante entre le PJ et les PNJ ;
-3. situations générées par l'état réel du monde ;
+1. mémoire relationnelle détaillée entre le PJ et chaque PNJ ;
+2. enrichissement progressif du roster Paris by Night, sans invention présentée comme canon ;
+3. situations générées par l'état réel de la société ;
 4. rumeurs, secrets et information imparfaite ;
-5. progression sociale fondée sur des relations et ressources concrètes ;
-6. approfondissement Domaines et droits de chasse ;
-7. accès organique aux fonctions politiques ;
-8. boucle longue sur plusieurs décennies et évolution historique.
+5. factions autonomes, dont la Cour des Miracles, avec vrais membres et agendas ;
+6. progression sociale fondée sur des relations et ressources concrètes ;
+7. approfondissement Domaines et droits de chasse ;
+8. offices politiques émergents et Praxis ;
+9. boucle longue où les grandes dates deviennent des pressions conditionnelles.
 
 Le principe directeur reste : **le personnage commence petit, le monde existe sans lui, et son importance éventuelle doit être gagnée par le jeu**.
