@@ -40,25 +40,59 @@ _POSITIVE_ACTIONS: dict[PoliticalAmbition, frozenset[ActionType]] = {
     ),
     PoliticalAmbition.GAIN_BOON: frozenset({ActionType.CALL_BOON, ActionType.DIPLOMACY}),
     PoliticalAmbition.LEAD_OPPOSITION: frozenset(
-        {ActionType.RECRUIT, ActionType.UNDERMINE, ActionType.POACH, ActionType.BUILD_INFLUENCE}
+        {
+            ActionType.RECRUIT,
+            ActionType.UNDERMINE,
+            ActionType.POACH,
+            ActionType.BUILD_INFLUENCE,
+            ActionType.CRISIS_EXPLOIT,
+        }
     ),
-    PoliticalAmbition.WEAKEN_RIVAL: frozenset({ActionType.UNDERMINE, ActionType.POACH}),
-    PoliticalAmbition.RAPPROCHEMENT: frozenset({ActionType.DIPLOMACY, ActionType.CONSOLIDATE_RELATION}),
+    PoliticalAmbition.WEAKEN_RIVAL: frozenset(
+        {ActionType.UNDERMINE, ActionType.POACH, ActionType.CRISIS_EXPLOIT}
+    ),
+    PoliticalAmbition.RAPPROCHEMENT: frozenset(
+        {ActionType.DIPLOMACY, ActionType.CONSOLIDATE_RELATION, ActionType.CRISIS_NEGOTIATE}
+    ),
     PoliticalAmbition.ENFORCE_ORDER: frozenset(
-        {ActionType.INVESTIGATE, ActionType.DOMAIN_STEWARD, ActionType.CONSOLIDATE_RELATION}
+        {
+            ActionType.INVESTIGATE,
+            ActionType.DOMAIN_STEWARD,
+            ActionType.CONSOLIDATE_RELATION,
+            ActionType.CRISIS_INVESTIGATE,
+            ActionType.CRISIS_INFILTRATE,
+            ActionType.CRISIS_CONTAIN,
+        }
     ),
-    PoliticalAmbition.REFORM_CLAN: frozenset({ActionType.DIPLOMACY, ActionType.RECRUIT}),
+    PoliticalAmbition.REFORM_CLAN: frozenset(
+        {ActionType.DIPLOMACY, ActionType.RECRUIT, ActionType.CRISIS_NEGOTIATE}
+    ),
     PoliticalAmbition.BECOME_PRIMOGEN: frozenset(
-        {ActionType.BUILD_INFLUENCE, ActionType.RECRUIT, ActionType.UNDERMINE}
+        {
+            ActionType.BUILD_INFLUENCE,
+            ActionType.RECRUIT,
+            ActionType.UNDERMINE,
+            ActionType.CRISIS_EXPLOIT,
+        }
     ),
 }
 
 _NEGATIVE_ACTIONS: dict[PoliticalAmbition, frozenset[ActionType]] = {
     PoliticalAmbition.RAPPROCHEMENT: frozenset(
-        {ActionType.UNDERMINE, ActionType.POACH, ActionType.DOMAIN_INTRUSION, ActionType.BRACONNAGE}
+        {
+            ActionType.UNDERMINE,
+            ActionType.POACH,
+            ActionType.DOMAIN_INTRUSION,
+            ActionType.BRACONNAGE,
+            ActionType.CRISIS_EXPLOIT,
+        }
     ),
-    PoliticalAmbition.ENFORCE_ORDER: frozenset({ActionType.POACH, ActionType.BRACONNAGE}),
-    PoliticalAmbition.REFORM_CLAN: frozenset({ActionType.CONSOLIDATE_RELATION}),
+    PoliticalAmbition.ENFORCE_ORDER: frozenset(
+        {ActionType.POACH, ActionType.BRACONNAGE, ActionType.CRISIS_EXPLOIT}
+    ),
+    PoliticalAmbition.REFORM_CLAN: frozenset(
+        {ActionType.CONSOLIDATE_RELATION, ActionType.CRISIS_EXPLOIT}
+    ),
     PoliticalAmbition.GAIN_DOMAIN: frozenset({ActionType.CONSOLIDATE_RELATION}),
     PoliticalAmbition.OBTAIN_EMBRACE: frozenset({ActionType.BRACONNAGE}),
 }

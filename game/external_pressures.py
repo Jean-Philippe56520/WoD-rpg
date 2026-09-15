@@ -1,8 +1,8 @@
 """Pressions extérieures opportunistes sur la Camarilla locale.
 
 La faiblesse politique attire les Anarchs ; les atteintes à la Mascarade attirent
-les chasseurs mortels. Les niveaux sont event-sourcés afin de rester persistants
-sans nouvelle table ni migration de sauvegarde.
+les chasseurs mortels. Depuis la V0.20, atteindre un seuil n'inflige plus directement
+la conséquence majeure : la pression ouvre d'abord une crise jouable.
 """
 
 from __future__ import annotations
@@ -10,13 +10,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .config import DEFAULT_RULES, GameRules
+from .crises import ANARCHS, HUNTERS, active_crises, has_active_crisis_for_faction, open_crisis
 from .models import Domain, GameEvent, GameState
 
 
 PRESSURE_PREFIX = "external_pressure"
-INCIDENT_PREFIX = "external_incident"
-ANARCHS = "anarchs"
-HUNTERS = "hunters"
 
 
 @dataclass(frozen=True)
@@ -49,16 +47,8 @@ def current_external_pressures(state: GameState) -> ExternalPressureState:
     )
 
 
-def _level_event(
-    state: GameState,
-    faction: str,
-    value: int,
-    previous: int,
-) -> GameEvent:
-    if faction == ANARCHS:
-        label = "L'agitation anarch"
-    else:
-        label = "L'attention des chasseurs mortels"
+def _level_event(state: GameState, faction: str, value: int, previous: int) -> GameEvent:
+    label = "L'agitation anarch" if faction == ANARCHS else "L'attention des chasseurs mortels"
     direction = "progresse" if value > previous else "recule"
     return GameEvent(
         night=state.night,
@@ -67,29 +57,22 @@ def _level_event(
     )
 
 
-def _choose_anarch_target(state: GameState) -> Domain | None:
-    if not state.domains:
+def _choose_anarch_target(state: GameState, excluded: set[str]) -> Domain | None:
+    candidates = [domain for domain in state.domains.values() if domain.id not in excluded]
+    if not candidates:
         return None
-    # Les Anarchs cherchent une position exploitable : faible Rempart, Viandis
-    # intéressant, puis pression déjà existante qui facilite l'agitation locale.
     return min(
-        state.domains.values(),
-        key=lambda domain: (
-            domain.rempart,
-            -domain.viandis,
-            -domain.pressure,
-            domain.id,
-        ),
+        candidates,
+        key=lambda domain: (domain.rempart, -domain.viandis, -domain.pressure, domain.id),
     )
 
 
-def _choose_hunter_target(state: GameState) -> Domain | None:
-    if not state.domains:
+def _choose_hunter_target(state: GameState, excluded: set[str]) -> Domain | None:
+    candidates = [domain for domain in state.domains.values() if domain.id not in excluded]
+    if not candidates:
         return None
-    # Les chasseurs suivent d'abord les zones où les incidents sont les plus
-    # dangereux pour la Mascarade, puis les endroits déjà sous pression.
     return max(
-        state.domains.values(),
+        candidates,
         key=lambda domain: (
             domain.masquerade_risk,
             domain.pressure,
@@ -99,11 +82,7 @@ def _choose_hunter_target(state: GameState) -> Domain | None:
     )
 
 
-def _next_anarch_pressure(
-    state: GameState,
-    current: int,
-    rules: GameRules,
-) -> int:
+def _next_anarch_pressure(state: GameState, current: int, rules: GameRules) -> int:
     if state.prince_id is None or state.praxis_status == "contested":
         return _clamp(current + rules.anarch_pressure_gain_contested, rules)
     if state.camarilla_stability < rules.anarch_stability_threshold:
@@ -113,11 +92,7 @@ def _next_anarch_pressure(
     return current
 
 
-def _next_hunter_attention(
-    state: GameState,
-    current: int,
-    rules: GameRules,
-) -> int:
+def _next_hunter_attention(state: GameState, current: int, rules: GameRules) -> int:
     if state.masquerade_integrity < rules.hunter_critical_masquerade_threshold:
         return _clamp(current + rules.hunter_attention_gain_critical, rules)
     if state.masquerade_integrity < rules.hunter_masquerade_threshold:
@@ -127,67 +102,63 @@ def _next_hunter_attention(
     return current
 
 
+def _crisis_transitioned_this_night(state: GameState, faction: str) -> bool:
+    """Empêche une crise tout juste réglée/échouée d'être recréée immédiatement."""
+
+    for event in state.events:
+        if event.night != state.night or not event.category.startswith("crisis_state|"):
+            continue
+        parts = event.category.split("|")
+        if len(parts) >= 3 and parts[2] == faction:
+            return True
+    return False
+
+
 def resolve_external_pressures(
     state: GameState,
     rules: GameRules = DEFAULT_RULES,
 ) -> list[GameEvent]:
-    """Fait évoluer les menaces et applique les incidents de seuil.
+    """Fait évoluer les menaces et ouvre les crises lorsque les seuils sont atteints.
 
-    Un incident consomme une partie de la pression accumulée sans l'annuler : une
-    ville durablement faible continuera donc d'attirer les opportunistes.
+    Une crise absorbe une partie de la pression qui l'a produite. Une transition de
+    crise pendant cette nuit crée aussi un tour de respiration : la même faction ne
+    peut pas recréer immédiatement une nouvelle crise lors de la même résolution.
     """
 
     previous = current_external_pressures(state)
     anarch_pressure = _next_anarch_pressure(state, previous.anarch_pressure, rules)
     hunter_attention = _next_hunter_attention(state, previous.hunter_attention, rules)
     events: list[GameEvent] = []
+    reserved_domains = {crisis.domain_id for crisis in active_crises(state)}
 
-    if anarch_pressure >= rules.anarch_incident_threshold:
-        domain = _choose_anarch_target(state)
+    can_open_anarch = (
+        anarch_pressure >= rules.anarch_incident_threshold
+        and not has_active_crisis_for_faction(state, ANARCHS)
+        and not _crisis_transitioned_this_night(state, ANARCHS)
+    )
+    if can_open_anarch:
+        domain = _choose_anarch_target(state, reserved_domains)
         if domain is not None:
-            domain.pressure += rules.anarch_incident_domain_pressure_gain
-            state.camarilla_stability = max(
-                0.0,
-                state.camarilla_stability - rules.anarch_incident_stability_loss,
-            )
+            events.append(open_crisis(state, ANARCHS, domain.id, rules))
+            reserved_domains.add(domain.id)
             anarch_pressure = _clamp(
                 anarch_pressure - rules.anarch_incident_pressure_relief,
                 rules,
             )
-            events.append(
-                GameEvent(
-                    night=state.night,
-                    category=f"{INCIDENT_PREFIX}|{ANARCHS}|{domain.id}|{state.night}",
-                    message=(
-                        f"Les Anarchs exploitent les fissures de la Camarilla autour de {domain.name}. "
-                        f"Agitation locale : pression du Domaine +{rules.anarch_incident_domain_pressure_gain} "
-                        f"et stabilité -{rules.anarch_incident_stability_loss:.0f}."
-                    ),
-                )
-            )
 
-    if hunter_attention >= rules.hunter_incident_threshold:
-        domain = _choose_hunter_target(state)
+    can_open_hunters = (
+        hunter_attention >= rules.hunter_incident_threshold
+        and not has_active_crisis_for_faction(state, HUNTERS)
+        and not _crisis_transitioned_this_night(state, HUNTERS)
+    )
+    if can_open_hunters:
+        domain = _choose_hunter_target(state, reserved_domains)
         if domain is not None:
-            domain.pressure += rules.hunter_incident_domain_pressure_gain
-            state.masquerade_integrity = max(
-                0.0,
-                state.masquerade_integrity - rules.hunter_incident_masquerade_loss,
-            )
+            events.append(open_crisis(state, HUNTERS, domain.id, rules))
+            reserved_domains.add(domain.id)
             hunter_attention = _clamp(
                 hunter_attention - rules.hunter_incident_attention_relief,
                 rules,
-            )
-            events.append(
-                GameEvent(
-                    night=state.night,
-                    category=f"{INCIDENT_PREFIX}|{HUNTERS}|{domain.id}|{state.night}",
-                    message=(
-                        f"Des chasseurs mortels resserrent leur surveillance autour de {domain.name}. "
-                        f"Pression du Domaine +{rules.hunter_incident_domain_pressure_gain} et "
-                        f"Mascarade -{rules.hunter_incident_masquerade_loss:.0f}."
-                    ),
-                )
             )
 
     if anarch_pressure != previous.anarch_pressure:

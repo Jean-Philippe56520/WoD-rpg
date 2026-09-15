@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from .config import DEFAULT_RULES, GameRules
+from .crises import CRISIS_ACTION_TYPES, active_crisis_for_domain
 from .models import (
     ActionType,
     ClanNightOrders,
@@ -64,6 +65,19 @@ class MultiplayerGameService:
                         raise ValueError("No recognized Prince can be challenged")
                     if action.actor_character_id != primogen_id:
                         raise ValueError("Only the current Primogen may challenge the Praxis")
+                if action.action_type in CRISIS_ACTION_TYPES:
+                    if not action.target_domain_id:
+                        raise ValueError("A crisis response requires a target Domain")
+                    crisis = active_crisis_for_domain(state, action.target_domain_id)
+                    if crisis is None:
+                        raise ValueError("No active crisis exists on the selected Domain")
+                    if action.action_type == ActionType.CRISIS_EXPLOIT:
+                        domain = state.domains[action.target_domain_id]
+                        holder = state.characters.get(domain.holder_id or "")
+                        if holder is None or holder.clan_id == clan_id:
+                            raise ValueError(
+                                "A clan may only exploit a crisis affecting a foreign Domain holder"
+                            )
                 used_actors.add(action.actor_character_id)
             if used_actors != eligible_ids:
                 raise ValueError("Every active clan member must receive exactly one action")
@@ -76,6 +90,8 @@ class MultiplayerGameService:
                     raise ValueError("A player cannot submit actions for another clan")
                 if action.action_type == ActionType.CHALLENGE_PRAXIS:
                     raise ValueError("Praxis challenge requires V0.8+ explicit actor orders")
+                if action.action_type in CRISIS_ACTION_TYPES:
+                    raise ValueError("Crisis responses require V0.8+ explicit actor orders")
 
         if orders.version >= 3:
             open_request_ids = {

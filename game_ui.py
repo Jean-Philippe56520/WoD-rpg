@@ -11,6 +11,13 @@ from game.auth import (
     AuthSession,
     SupabaseAuthClient,
 )
+from game.crises import (
+    CRISIS_ACTION_LABELS,
+    CRISIS_ACTION_TYPES,
+    active_crises,
+    crisis_stage_label,
+    crisis_title,
+)
 from game.domains import active_hunting_rights, has_hunting_access, initialize_domains
 from game.factions import (
     clan_total_influence,
@@ -46,7 +53,7 @@ from game.world import candidates_from_state
 
 st.set_page_config(page_title="WoD RPG - Chronique politique", page_icon="🩸", layout="wide")
 st.title("WoD RPG - Chronique politique")
-st.caption("V0.18 — Praxis contestable, pactes, Étreintes, Faim et politique territoriale")
+st.caption("V0.20 — crises jouables, Praxis contestable, Faim et politique territoriale")
 
 AUTH_SESSION_KEY = "wod_auth_session"
 LOCAL_PLAYER_KEY = "wod_local_player_id"
@@ -99,9 +106,10 @@ BOON_LEVEL_LABELS = {
     BoonLevel.LIFE: "Dette de vie",
 }
 
-# Le moteur central conserve les libellés historiques dans game.actions. Cette
-# action V0.18 est ajoutée ici pour rester compatible avec les vues V0.10 héritées.
+# Les actions récentes sont ajoutées à la table centrale historique sans modifier
+# le comportement des anciennes vues/actions.
 ACTION_LABELS[ActionType.CHALLENGE_PRAXIS] = "Contester la Praxis"
+ACTION_LABELS.update(CRISIS_ACTION_LABELS)
 
 
 @st.cache_resource
@@ -399,6 +407,19 @@ night_tab, clan_tab, domains_tab, prestation_tab, city_tab, elysium_tab, reports
 
 with night_tab:
     st.subheader(f"Ordres du clan {own_clan.name} - Nuit {state.night}")
+    current_crises = active_crises(state)
+    if current_crises:
+        st.markdown("#### Crises pouvant mobiliser vos vampires")
+        for crisis in current_crises:
+            st.write(
+                f"**{crisis_title(state, crisis)}** · {crisis_stage_label(crisis.stage)} · "
+                f"escalade nuit {crisis.next_escalation_night}"
+            )
+        st.caption(
+            "Répondre à une crise consomme l'action nocturne du vampire choisi. Plusieurs vampires et "
+            "plusieurs clans peuvent contribuer à la même crise."
+        )
+
     already_submitted = submission_statuses.get(player_clan, False)
     if already_submitted:
         st.info("Vos ordres sont persistants et verrouillés. Ils seront résolus avec ceux des autres clans.")
@@ -666,6 +687,13 @@ with night_tab:
                         for domain in state.domains.values()
                         if not has_hunting_access(state, actor.id, domain.id)
                     ]
+                    exploitable_crises = [
+                        crisis
+                        for crisis in current_crises
+                        if state.domains[crisis.domain_id].holder_id
+                        and state.characters[state.domains[crisis.domain_id].holder_id].clan_id
+                        != player_clan
+                    ]
 
                     options = [ActionType.BUILD_INFLUENCE, ActionType.DIPLOMACY, ActionType.INVESTIGATE]
                     if actor.id == own_clan.primogen_id and state.prince_id is not None:
@@ -686,6 +714,17 @@ with night_tab:
                         options.append(ActionType.DOMAIN_INTRUSION)
                     if braconnage_domains:
                         options.append(ActionType.BRACONNAGE)
+                    if current_crises:
+                        options.extend(
+                            [
+                                ActionType.CRISIS_INVESTIGATE,
+                                ActionType.CRISIS_INFILTRATE,
+                                ActionType.CRISIS_NEGOTIATE,
+                                ActionType.CRISIS_CONTAIN,
+                            ]
+                        )
+                    if exploitable_crises:
+                        options.append(ActionType.CRISIS_EXPLOIT)
 
                     action_type = st.selectbox(
                         "Action",
@@ -697,7 +736,40 @@ with night_tab:
                     target_clan_id = None
                     target_domain_id = None
 
-                    if action_type == ActionType.CHALLENGE_PRAXIS:
+                    if action_type in CRISIS_ACTION_TYPES:
+                        crisis_choices = (
+                            exploitable_crises
+                            if action_type == ActionType.CRISIS_EXPLOIT
+                            else current_crises
+                        )
+                        crisis_by_domain = {crisis.domain_id: crisis for crisis in crisis_choices}
+                        target_domain_id = st.selectbox(
+                            "Crise ciblée",
+                            options=list(crisis_by_domain),
+                            format_func=lambda did: (
+                                f"{crisis_title(state, crisis_by_domain[did])} — "
+                                f"{crisis_stage_label(crisis_by_domain[did].stage)}"
+                            ),
+                            key=f"target_crisis_{state.night}_{actor.id}_{action_type.value}",
+                        )
+                        selected_crisis = crisis_by_domain[target_domain_id]
+                        if action_type == ActionType.CRISIS_INVESTIGATE:
+                            st.caption(
+                                "Cette action cherche des informations : elle facilite les interventions futures "
+                                "mais ne réduit pas directement la menace."
+                            )
+                        elif action_type == ActionType.CRISIS_EXPLOIT:
+                            st.warning(
+                                "Cette action ne résout pas la crise. Elle cherche à convertir la faiblesse du "
+                                "détenteur étranger en influence politique ; une manipulation découverte peut "
+                                "créer un grief."
+                            )
+                        else:
+                            st.caption(
+                                f"Intervention sur une crise {crisis_stage_label(selected_crisis.stage)}. "
+                                "Les progrès de tous les vampires engagés cette nuit se cumulent."
+                            )
+                    elif action_type == ActionType.CHALLENGE_PRAXIS:
                         st.warning(
                             "Action publique : votre Primogène engage le poids politique de son clan contre "
                             "la Praxis reconnue. Si la coalition est insuffisante, le Prince conservera le "
@@ -1123,6 +1195,7 @@ with reports_tab:
                 st.write(f"- {item}")
 
 st.caption(
-    "V0.18 : politique vampirique persistante — Praxis contestable, pactes diplomatiques, Étreintes, "
-    "factions, coteries, Faim, Domaines, Viandis, Servage, Rempart, Prestation et conséquences."
+    "V0.20 : politique vampirique persistante — crises Anarchs/chasseurs jouables, Praxis contestable, "
+    "pactes diplomatiques, Étreintes, factions, coteries, Faim, Domaines, Viandis, Servage, Rempart, "
+    "Prestation et conséquences."
 )
