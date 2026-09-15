@@ -29,11 +29,33 @@ class MultiplayerGameService:
             raise ValueError("Orders must belong to the player's clan")
         if clan_id not in state.clan_states:
             raise ValueError(f"Unknown clan: {clan_id}")
-        if len(orders.actions) > self.rules.actions_per_clan:
-            raise ValueError(f"Maximum {self.rules.actions_per_clan} actions per night")
-        for action in orders.actions:
-            if action.clan_id != clan_id:
-                raise ValueError("A player cannot submit actions for another clan")
+
+        if orders.version >= 2:
+            eligible_ids = {
+                character.id
+                for character in state.characters.values()
+                if character.clan_id == clan_id and character.id != state.prince_id
+            }
+            if len(orders.actions) > len(eligible_ids):
+                raise ValueError("A clan cannot submit more than one action per active member")
+            used_actors: set[str] = set()
+            for action in orders.actions:
+                if action.clan_id != clan_id:
+                    raise ValueError("A player cannot submit actions for another clan")
+                if not action.actor_character_id:
+                    raise ValueError("V0.8 actions require an acting character")
+                if action.actor_character_id not in eligible_ids:
+                    raise ValueError("Action actor must be an active member of the player's clan")
+                if action.actor_character_id in used_actors:
+                    raise ValueError("A vampire can perform only one action per night")
+                used_actors.add(action.actor_character_id)
+        else:
+            # Une nuit déjà soumise avant V0.8 conserve exactement son ancien budget.
+            if len(orders.actions) > self.rules.actions_per_clan:
+                raise ValueError(f"Maximum {self.rules.actions_per_clan} legacy actions per night")
+            for action in orders.actions:
+                if action.clan_id != clan_id:
+                    raise ValueError("A player cannot submit actions for another clan")
 
         primogen_id = state.clan_states[clan_id].clan.primogen_id
         if state.prince_id is None:
