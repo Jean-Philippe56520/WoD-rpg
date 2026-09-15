@@ -10,7 +10,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .config import DEFAULT_RULES, GameRules
-from .crises import ANARCHS, HUNTERS, active_crises, has_active_crisis_for_faction, open_crisis
+from .crises import (
+    ANARCHS,
+    HUNTERS,
+    active_crises,
+    has_active_crisis_for_faction,
+    open_crisis,
+    resolve_crisis_cycle,
+)
 from .models import Domain, GameEvent, GameState
 
 
@@ -53,10 +60,7 @@ def _level_event(
     value: int,
     previous: int,
 ) -> GameEvent:
-    if faction == ANARCHS:
-        label = "L'agitation anarch"
-    else:
-        label = "L'attention des chasseurs mortels"
+    label = "L'agitation anarch" if faction == ANARCHS else "L'attention des chasseurs mortels"
     direction = "progresse" if value > previous else "recule"
     return GameEvent(
         night=state.night,
@@ -69,8 +73,6 @@ def _choose_anarch_target(state: GameState, excluded: set[str]) -> Domain | None
     candidates = [domain for domain in state.domains.values() if domain.id not in excluded]
     if not candidates:
         return None
-    # Les Anarchs cherchent une position exploitable : faible Rempart, Viandis
-    # intéressant, puis pression déjà existante qui facilite l'agitation locale.
     return min(
         candidates,
         key=lambda domain: (
@@ -86,8 +88,6 @@ def _choose_hunter_target(state: GameState, excluded: set[str]) -> Domain | None
     candidates = [domain for domain in state.domains.values() if domain.id not in excluded]
     if not candidates:
         return None
-    # Les chasseurs suivent d'abord les zones où les incidents sont les plus
-    # dangereux pour la Mascarade, puis les endroits déjà sous pression.
     return max(
         candidates,
         key=lambda domain: (
@@ -99,11 +99,7 @@ def _choose_hunter_target(state: GameState, excluded: set[str]) -> Domain | None
     )
 
 
-def _next_anarch_pressure(
-    state: GameState,
-    current: int,
-    rules: GameRules,
-) -> int:
+def _next_anarch_pressure(state: GameState, current: int, rules: GameRules) -> int:
     if state.prince_id is None or state.praxis_status == "contested":
         return _clamp(current + rules.anarch_pressure_gain_contested, rules)
     if state.camarilla_stability < rules.anarch_stability_threshold:
@@ -113,11 +109,7 @@ def _next_anarch_pressure(
     return current
 
 
-def _next_hunter_attention(
-    state: GameState,
-    current: int,
-    rules: GameRules,
-) -> int:
+def _next_hunter_attention(state: GameState, current: int, rules: GameRules) -> int:
     if state.masquerade_integrity < rules.hunter_critical_masquerade_threshold:
         return _clamp(current + rules.hunter_attention_gain_critical, rules)
     if state.masquerade_integrity < rules.hunter_masquerade_threshold:
@@ -131,23 +123,29 @@ def resolve_external_pressures(
     state: GameState,
     rules: GameRules = DEFAULT_RULES,
 ) -> list[GameEvent]:
-    """Fait évoluer les menaces et ouvre les crises lorsque les seuils sont atteints.
+    """Résout les crises existantes, puis fait évoluer les pressions extérieures.
 
-    Une crise absorbe une partie de la pression qui l'a produite. Tant que cette
-    crise reste active, la même faction ne crée pas une seconde crise ; la pression
-    peut cependant continuer à monter, rendant une rechute rapide possible ensuite.
+    Une crise active au début de la nuit bloque l'ouverture d'une deuxième crise
+    de la même faction pendant cette résolution, même si elle vient d'être réglée.
+    Cela évite une réapparition immédiate sans fenêtre politique intermédiaire.
     """
+
+    active_at_start = active_crises(state)
+    had_anarch_crisis = any(crisis.faction == ANARCHS for crisis in active_at_start)
+    had_hunter_crisis = any(crisis.faction == HUNTERS for crisis in active_at_start)
+
+    events = resolve_crisis_cycle(state, rules)
 
     previous = current_external_pressures(state)
     anarch_pressure = _next_anarch_pressure(state, previous.anarch_pressure, rules)
     hunter_attention = _next_hunter_attention(state, previous.hunter_attention, rules)
-    events: list[GameEvent] = []
-    reserved_domains = {crisis.domain_id for crisis in active_crises(state)}
 
-    if (
-        anarch_pressure >= rules.anarch_incident_threshold
-        and not has_active_crisis_for_faction(state, ANARCHS)
-    ):
+    # Les transitions de crise de cette nuit ne sont pas encore ajoutées à
+    # state.events. On réserve donc au minimum tous les Domaines qui étaient sous
+    # crise au début de cette phase de fin de nuit.
+    reserved_domains = {crisis.domain_id for crisis in active_at_start}
+
+    if anarch_pressure >= rules.anarch_incident_threshold and not had_anarch_crisis:
         domain = _choose_anarch_target(state, reserved_domains)
         if domain is not None:
             events.append(open_crisis(state, ANARCHS, domain.id, rules))
@@ -157,10 +155,7 @@ def resolve_external_pressures(
                 rules,
             )
 
-    if (
-        hunter_attention >= rules.hunter_incident_threshold
-        and not has_active_crisis_for_faction(state, HUNTERS)
-    ):
+    if hunter_attention >= rules.hunter_incident_threshold and not had_hunter_crisis:
         domain = _choose_hunter_target(state, reserved_domains)
         if domain is not None:
             events.append(open_crisis(state, HUNTERS, domain.id, rules))
