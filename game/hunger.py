@@ -2,21 +2,17 @@
 
 La chasse de routine ne consomme pas une action : disposer d'un Domaine personnel
 ou d'un droit de chasse actif permet de se nourrir discrètement entre les scènes.
-Sans accès légal, la Faim monte. Le braconnage reste l'option active d'urgence.
+Sans accès exploitable, la Faim monte. Le braconnage reste l'option active d'urgence.
 """
 
 from __future__ import annotations
 
+from .clan_identity import routine_feeding_allowed
 from .models import GameEvent, GameState, HuntingRightStatus
 
 
 def active_hunting_access_domains(state: GameState, character_id: str) -> tuple[str, ...]:
-    """Domaines où le vampire peut légalement se nourrir cette nuit.
-
-    On respecte directement ``expires_night`` afin qu'un droit soit valable jusqu'à
-    sa nuit d'échéance incluse, même si son statut n'est marqué EXPIRED qu'en fin de
-    résolution par le moteur territorial historique.
-    """
+    """Domaines où le vampire possède légalement un droit de chasse cette nuit."""
 
     domain_ids = {
         domain.id
@@ -34,11 +30,22 @@ def active_hunting_access_domains(state: GameState, character_id: str) -> tuple[
     return tuple(sorted(domain_ids))
 
 
+def exploitable_hunting_domains(state: GameState, character_id: str) -> tuple[str, ...]:
+    character = state.characters[character_id]
+    return tuple(
+        domain_id
+        for domain_id in active_hunting_access_domains(state, character_id)
+        if routine_feeding_allowed(character, state.domains[domain_id])
+    )
+
+
 def preferred_hunting_domain(state: GameState, character_id: str) -> str | None:
-    candidates = [state.domains[domain_id] for domain_id in active_hunting_access_domains(state, character_id)]
+    candidates = [
+        state.domains[domain_id]
+        for domain_id in exploitable_hunting_domains(state, character_id)
+    ]
     if not candidates:
         return None
-    # Le vampire privilégie un Viandis riche et une zone peu sous pression.
     return max(candidates, key=lambda domain: (domain.viandis, -domain.pressure, domain.id)).id
 
 
@@ -49,11 +56,7 @@ def hunger_penalty(hunger: int) -> int:
 
 
 def resolve_hunger(state: GameState) -> list[GameEvent]:
-    """Résout la chasse de routine en fin de nuit.
-
-    Le Prince n'est pas piloté comme membre de clan ; sa logistique alimentaire est
-    donc abstraite tant qu'un véritable système d'actions princières n'existe pas.
-    """
+    """Résout la chasse de routine en fin de nuit."""
 
     events: list[GameEvent] = []
     for character in state.characters.values():
@@ -61,6 +64,7 @@ def resolve_hunger(state: GameState) -> list[GameEvent]:
             continue
 
         before = character.hunger
+        legal_domains = active_hunting_access_domains(state, character.id)
         domain_id = preferred_hunting_domain(state, character.id)
         if domain_id is not None:
             character.hunger = max(1, character.hunger - 1)
@@ -81,6 +85,10 @@ def resolve_hunger(state: GameState) -> list[GameEvent]:
 
         character.hunger = min(5, character.hunger + 1)
         if character.hunger > before:
+            if legal_domains and character.clan_id == "ventrue":
+                cause = "ses accès légaux ne permettent pas de satisfaire son goût raffiné"
+            else:
+                cause = "il ne dispose d'aucun droit de chasse exploitable"
             warning = (
                 " La Bête perturbera fortement ses actions politiques."
                 if character.hunger >= 5
@@ -95,7 +103,7 @@ def resolve_hunger(state: GameState) -> list[GameEvent]:
                     night=state.night,
                     category="faim",
                     message=(
-                        f"{character.name} ne dispose d'aucun droit de chasse exploitable : "
+                        f"{character.name} ne se nourrit pas correctement car {cause} : "
                         f"Faim {before} → {character.hunger}.{warning}"
                     ),
                     audience_clan_ids=(character.clan_id,),
