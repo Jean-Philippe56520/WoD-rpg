@@ -52,6 +52,24 @@ PARIS_BY_NIGHT_ROOT = LoreSourceRef(
     audit_status="audited",
 )
 
+WOD_RPG_ERA_MODEL = LoreSourceRef(
+    key="wod_rpg_era_model",
+    label="WoD-rpg — modèle d'ères",
+    url="https://github.com/Jean-Philippe56520/WoD-rpg/blob/main/game/era.py",
+    tier="C",
+    note="Arbitrage interne du moteur ; ne constitue pas une source canonique externe.",
+    source_type="internal_model",
+    categories=("timeline", "era", "arbitration"),
+    periods=("all",),
+    audit_status="audited",
+)
+
+
+def _pbn_url(slug: str) -> str:
+    if slug.startswith("index.php?"):
+        return f"https://parisbynight.quelquesmots.fr/{slug}"
+    return f"https://parisbynight.quelquesmots.fr/index.php/{slug}"
+
 
 def _pbn(
     key: str,
@@ -70,7 +88,7 @@ def _pbn(
     return LoreSourceRef(
         key=key,
         label=label,
-        url=f"https://parisbynight.quelquesmots.fr/index.php/{slug}",
+        url=_pbn_url(slug),
         tier=tier,
         note=note,
         categories=categories,
@@ -321,6 +339,7 @@ PARIS_BY_NIGHT_PAGES: dict[str, LoreSourceRef] = {
 
 PARIS_CORPUS_SOURCES: dict[str, LoreSourceRef] = {
     PARIS_BY_NIGHT_ROOT.key: PARIS_BY_NIGHT_ROOT,
+    WOD_RPG_ERA_MODEL.key: WOD_RPG_ERA_MODEL,
     **PARIS_BY_NIGHT_PAGES,
 }
 
