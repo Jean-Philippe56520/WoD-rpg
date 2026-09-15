@@ -9,7 +9,7 @@ from .chronicle_simulation import (
     grant_boon,
 )
 from .clans import situation_bonus
-from .dice import DiceResult, roll_pool
+from .dice import DiceResult, difficulty_band, difficulty_hint, roll_pool
 from .era import CamarillaStage, era_for_year
 from .relationship_memory import (
     record_relationship_memory,
@@ -18,6 +18,19 @@ from .relationship_memory import (
 )
 from .sire_relations import sire_bond
 from .vampire_profile import VampireProfile
+
+
+RELATIONAL_EFFECTS = frozenset(
+    {
+        "sire_service",
+        "sire_negotiate",
+        "sire_refuse",
+        "seek_release",
+        "political_voice",
+        "protect_touchstone",
+        "cautious_distance",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -50,6 +63,55 @@ class SituationResolution:
     outcome: NightOutcome
     simulation: SimulationState
     profile: VampireProfile
+
+
+@dataclass(frozen=True)
+class ActionRiskPreview:
+    """Player-facing estimate of a check without exposing its numeric target."""
+
+    attribute: str
+    skill: str
+    band: str
+    hint: str
+
+
+def effective_difficulty(
+    character: PlayerCharacter,
+    simulation: SimulationState,
+    situation: Situation,
+    choice: SituationChoice,
+) -> tuple[int, int]:
+    """Return exact hidden difficulty and contextual adjustment.
+
+    Character capability changes the dice pool elsewhere. Circumstances change
+    the target here. Keeping those two axes separate makes political preparation,
+    relationships and leverage useful without pretending the vampire's raw skill
+    score has changed.
+    """
+
+    relation_adjustment = (
+        relationship_difficulty_adjustment(simulation, situation.source_actor_id, character)
+        if choice.effect in RELATIONAL_EFFECTS
+        else 0
+    )
+    return max(1, choice.difficulty + relation_adjustment), relation_adjustment
+
+
+def action_risk_preview(
+    character: PlayerCharacter,
+    simulation: SimulationState,
+    situation: Situation,
+    choice: SituationChoice,
+) -> ActionRiskPreview:
+    """Describe risk in broad bands; never return the exact target to the UI."""
+
+    difficulty, _ = effective_difficulty(character, simulation, situation, choice)
+    return ActionRiskPreview(
+        attribute=choice.attribute,
+        skill=choice.skill,
+        band=difficulty_band(difficulty),
+        hint=difficulty_hint(difficulty),
+    )
 
 
 def _sire_situation(character: PlayerCharacter) -> Situation:
@@ -364,7 +426,7 @@ def _relationship_effect(
         return simulation, ()
 
     # Listening or abstaining does not make the source actor remember the PJ.
-    # Hunting becomes relational only if the Beast leaves a memorable trace.
+    # Hunting becomes relational only if the action produces a political trace.
     if choice.effect in {"political_intel", "abstain"}:
         return simulation, ()
     if choice.effect in {"hunt", "hunt_social"} and not (dice.messy_critical or dice.bestial_failure):
@@ -375,42 +437,35 @@ def _relationship_effect(
     respect_delta = 0
     fear_delta = 0
     grievance = False
-    valence = 1 if dice.success else -1
+    valence = 0
 
     if choice.effect == "sire_service":
-        if dice.success:
-            disposition_delta, trust_delta = 1, 1
-            respect_delta = 1 if dice.critical else 0
-        else:
-            trust_delta = -1
+        disposition_delta = 1 if dice.success else -1
+        trust_delta = 1 if dice.success else -1
+        valence = 1 if dice.success else -1
     elif choice.effect == "sire_negotiate":
-        if dice.success:
-            trust_delta, respect_delta = 1, 1
-        else:
-            disposition_delta, trust_delta = -1, -1
+        respect_delta = 1 if dice.success else -1
+        trust_delta = 1 if dice.success else -1
+        grievance = not dice.success
+        valence = 1 if dice.success else -1
     elif choice.effect == "sire_refuse":
-        if dice.success:
-            disposition_delta, trust_delta, respect_delta = -1, -1, 1
-            valence = 0
-        else:
-            disposition_delta, trust_delta = -1, -1
-            grievance = True
+        respect_delta = 1 if dice.success else -1
+        trust_delta = -1
+        grievance = not dice.success
+        valence = 1 if dice.success else -1
     elif choice.effect == "seek_release":
-        if dice.success:
-            respect_delta = 2
-        else:
-            disposition_delta, trust_delta = -1, -1
-            grievance = True
+        respect_delta = 2 if dice.success else -1
+        trust_delta = 1 if dice.success else -1
+        grievance = not dice.success
+        valence = 2 if dice.success else -1
     elif choice.effect in {"political_voice", "protect_touchstone"}:
-        if dice.success:
-            disposition_delta, respect_delta = 1, 1
-            if dice.critical:
-                respect_delta += 1
-        else:
-            respect_delta = -1
+        respect_delta = 1 if dice.success else -1
+        disposition_delta = 1 if dice.critical else 0
+        grievance = dice.bestial_failure
+        valence = 1 if dice.success else -1
     elif choice.effect == "cautious_distance":
-        if not dice.success:
-            disposition_delta, respect_delta = -1, -1
+        disposition_delta = 0 if dice.success else -1
+        valence = 0 if dice.success else -1
     elif choice.effect in {"hunt", "hunt_social"}:
         disposition_delta = -1
         fear_delta = 1
@@ -457,21 +512,7 @@ def resolve_situation(
 
     bonus = situation_bonus(character.clan_id, situation.tags)
     pool = profile.pool(choice.attribute, choice.skill, bonus=bonus)
-    relational_effects = {
-        "sire_service",
-        "sire_negotiate",
-        "sire_refuse",
-        "seek_release",
-        "political_voice",
-        "protect_touchstone",
-        "cautious_distance",
-    }
-    relation_adjustment = (
-        relationship_difficulty_adjustment(simulation, situation.source_actor_id, character)
-        if choice.effect in relational_effects
-        else 0
-    )
-    difficulty = max(1, choice.difficulty + relation_adjustment)
+    difficulty, relation_adjustment = effective_difficulty(character, simulation, situation, choice)
     seed = (
         f"{character.character_id}:{character.chapter}:{character.segment}:"
         f"{character.local_night}:{situation.id}:{choice.id}"
