@@ -9,7 +9,7 @@ from .chronicle_simulation import (
     grant_boon,
 )
 from .clans import situation_bonus
-from .dice import DiceResult, roll_pool
+from .dice import DiceResult, difficulty_band, difficulty_hint, roll_pool
 from .era import CamarillaStage, era_for_year
 from .relationship_memory import (
     record_relationship_memory,
@@ -18,6 +18,19 @@ from .relationship_memory import (
 )
 from .sire_relations import sire_bond
 from .vampire_profile import VampireProfile
+
+
+RELATIONAL_EFFECTS = frozenset(
+    {
+        "sire_service",
+        "sire_negotiate",
+        "sire_refuse",
+        "seek_release",
+        "political_voice",
+        "protect_touchstone",
+        "cautious_distance",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -50,6 +63,55 @@ class SituationResolution:
     outcome: NightOutcome
     simulation: SimulationState
     profile: VampireProfile
+
+
+@dataclass(frozen=True)
+class ActionRiskPreview:
+    """Player-facing estimate of a check without exposing its numeric target."""
+
+    attribute: str
+    skill: str
+    band: str
+    hint: str
+
+
+def effective_difficulty(
+    character: PlayerCharacter,
+    simulation: SimulationState,
+    situation: Situation,
+    choice: SituationChoice,
+) -> tuple[int, int]:
+    """Return exact hidden difficulty and contextual adjustment.
+
+    Character capability changes the dice pool elsewhere. Circumstances change
+    the target here. Keeping those two axes separate makes political preparation,
+    relationships and leverage useful without pretending the vampire's raw skill
+    score has changed.
+    """
+
+    relation_adjustment = (
+        relationship_difficulty_adjustment(simulation, situation.source_actor_id, character)
+        if choice.effect in RELATIONAL_EFFECTS
+        else 0
+    )
+    return max(1, choice.difficulty + relation_adjustment), relation_adjustment
+
+
+def action_risk_preview(
+    character: PlayerCharacter,
+    simulation: SimulationState,
+    situation: Situation,
+    choice: SituationChoice,
+) -> ActionRiskPreview:
+    """Describe risk in broad bands; never return the exact target to the UI."""
+
+    difficulty, _ = effective_difficulty(character, simulation, situation, choice)
+    return ActionRiskPreview(
+        attribute=choice.attribute,
+        skill=choice.skill,
+        band=difficulty_band(difficulty),
+        hint=difficulty_hint(difficulty),
+    )
 
 
 def _sire_situation(character: PlayerCharacter) -> Situation:
@@ -457,21 +519,7 @@ def resolve_situation(
 
     bonus = situation_bonus(character.clan_id, situation.tags)
     pool = profile.pool(choice.attribute, choice.skill, bonus=bonus)
-    relational_effects = {
-        "sire_service",
-        "sire_negotiate",
-        "sire_refuse",
-        "seek_release",
-        "political_voice",
-        "protect_touchstone",
-        "cautious_distance",
-    }
-    relation_adjustment = (
-        relationship_difficulty_adjustment(simulation, situation.source_actor_id, character)
-        if choice.effect in relational_effects
-        else 0
-    )
-    difficulty = max(1, choice.difficulty + relation_adjustment)
+    difficulty, relation_adjustment = effective_difficulty(character, simulation, situation, choice)
     seed = (
         f"{character.character_id}:{character.chapter}:{character.segment}:"
         f"{character.local_night}:{situation.id}:{choice.id}"
