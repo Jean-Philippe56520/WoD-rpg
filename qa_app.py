@@ -7,6 +7,7 @@ import streamlit as st
 
 from game.chronicle_ui import render_chronicle_app
 from game.editable_repository import EditableSQLiteGameRepository
+from game.night_cycle_ui import install_night_cycle_ui
 from game.qa_scenarios import (
     QA_SCENARIOS,
     ensure_qa_scenario,
@@ -23,6 +24,7 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
+install_night_cycle_ui()
 
 
 def _database_path(scenario_id: str) -> Path:
