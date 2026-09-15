@@ -9,6 +9,7 @@ from .autonomy import resolve_autonomous_reactions
 from .config import DEFAULT_RULES, GameRules
 from .domains import (
     grant_hunting_right,
+    has_hunting_access,
     initialize_domains,
     open_domain_dispute,
     resolve_domain_pressure,
@@ -99,12 +100,23 @@ def _apply_domain_decision(
     if order.decision == DomainDecisionType.GRANT_HUNTING_RIGHT:
         if not order.beneficiary_id:
             raise ValueError("Granting a hunting right requires a beneficiary")
+        beneficiary = state.characters[order.beneficiary_id]
+        if has_hunting_access(state, beneficiary.id, domain.id):
+            return GameEvent(
+                night=state.night,
+                category="domaine",
+                message=(
+                    f"La concession prévue par {primogen.name} sur {domain.name} devient sans objet : "
+                    f"{beneficiary.name} dispose déjà d'un droit de chasse reconnu."
+                ),
+                audience_clan_ids=_audience_for_characters(state, primogen_id, beneficiary.id),
+            )
         boon_id = None
         if order.boon_level:
             boon = create_boon(
                 state,
                 creditor_id=primogen_id,
-                debtor_id=order.beneficiary_id,
+                debtor_id=beneficiary.id,
                 level=order.boon_level,
                 origin=f"Droit de chasse accordé sur {domain.name}",
             )
@@ -112,13 +124,12 @@ def _apply_domain_decision(
         right = grant_hunting_right(
             state,
             domain_id=domain.id,
-            beneficiary_id=order.beneficiary_id,
+            beneficiary_id=beneficiary.id,
             granted_by_id=primogen_id,
             duration_nights=order.duration_nights,
             conditions="Concession directe du Primogène",
             boon_id=boon_id,
         )
-        beneficiary = state.characters[right.beneficiary_id]
         counterpart = (
             f" contre une faveur {order.boon_level.value}" if order.boon_level else ""
         )
