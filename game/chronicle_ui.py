@@ -1,29 +1,35 @@
 from __future__ import annotations
 
+from dataclasses import replace
 import uuid
 
 import streamlit as st
 
 from .chronicle import (
-    ACTION_LABELS,
     CHRONICLE_GAME_ID,
     CHRONICLE_NAME,
     CLAN_DISCIPLINES,
     CLAN_LABELS,
     OFFICE_LABELS,
     ChronicleProgress,
-    PersonalAction,
     SUPPORTED_CLANS,
     create_player_character,
-    nightly_hook,
-    resolve_personal_night,
     sire_for_id,
 )
+from .chronicle_offices import office_eligibility
 from .chronicle_scenes import ChronicleSceneStore
 from .chronicle_service import ChronicleService
+from .chronicle_simulation import active_hunting_access, ensure_character_links
+from .chronicle_simulation_store import ChronicleSimulationStore
 from .chronicle_store import ChronicleStore
 from .chronicle_world_store import ChronicleWorldStore
+from .clans import clan_identity
+from .era import era_for_year
 from .models import GameState
+from .sire_relations import sire_bond
+from .situations import generate_situations, resolve_situation
+from .vampire_profile import default_profile
+from .vampire_profile_store import VampireProfileStore
 
 
 MORTAL_STANCE_LABELS = {
@@ -33,6 +39,20 @@ MORTAL_STANCE_LABELS = {
 ORDER_STANCE_LABELS = {
     "orthodox": "Attaché aux anciens usages",
     "reformist": "Réformateur",
+}
+ROAD_LABELS = {
+    "humanitatis": "Via Humanitatis",
+    "regalis": "Via Regalis",
+    "caeli": "Via Caeli",
+    "bestiae": "Via Bestiae",
+    "peccati": "Via Peccati",
+    "via_mutationis": "Voie de la transformation",
+}
+CAMARILLA_STAGE_LABELS = {
+    "absent": "Aucune Camarilla constituée",
+    "project": "Camarilla naissante — coalition annoncée",
+    "coalition": "Coalition proto-Camarilla",
+    "institutional": "Camarilla institutionnelle",
 }
 
 
@@ -48,12 +68,18 @@ def _ensure_chronicle(repo) -> ChronicleStore:
     return store
 
 
-def _render_creation(store: ChronicleStore, player_id: str, default_player_name: str) -> None:
+def _render_creation(
+    store: ChronicleStore,
+    profile_store: VampireProfileStore,
+    simulation_store: ChronicleSimulationStore,
+    player_id: str,
+    default_player_name: str,
+) -> None:
     st.title("WoD RPG — Les Premières Nuits")
-    st.caption("1435 · La société caïnite se cherche encore un ordre commun")
+    st.caption("1435 · Révolte, lignages et naissance d'un nouvel ordre")
     st.markdown(
-        "Vous n'êtes pas un clan. Vous êtes un vampire récemment Étreint, encore dépendant de votre sire, "
-        "avec peu de Statut et presque aucun poids politique. Votre place se gagnera nuit après nuit."
+        "Vous êtes un vampire récemment Étreint. Votre sire répond encore de vous, votre droit de chasse dépend "
+        "d'autrui et la Camarilla qui vient d'être annoncée reste une coalition contestée, loin de son ordre futur."
     )
 
     with st.form("create_player_character"):
@@ -66,7 +92,7 @@ def _render_creation(store: ChronicleStore, player_id: str, default_player_name:
             format_func=lambda value: CLAN_LABELS[value],
         )
         concept = st.text_input(
-            "Concept",
+            "Concept mortel / social",
             placeholder="Ex. chevalier déchu, copiste monastique, héritière marchande…",
         )
         mortal_stance = st.selectbox(
@@ -83,13 +109,34 @@ def _render_creation(store: ChronicleStore, player_id: str, default_player_name:
             "Discipline de départ dominante",
             options=CLAN_DISCIPLINES[clan_id],
         )
+        conviction = st.text_input(
+            "Conviction",
+            placeholder="Ex. Je ne sacrifierai pas un innocent pour ma propre sécurité.",
+        )
+        touchstone = st.text_input(
+            "Pierre de touche mortelle",
+            placeholder="Ex. ma sœur restée humaine, mon ancien apprenti, un village protégé…",
+        )
+        road_affinity = st.selectbox(
+            "Affinité de Voie",
+            options=("humanitatis", "regalis", "caeli", "bestiae", "peccati"),
+            format_func=lambda value: ROAD_LABELS[value],
+        )
+        feeding_preference = st.text_input(
+            "Préférence de chasse",
+            placeholder="Particulièrement importante pour un Ventrue ; sinon facultative.",
+        )
+        current_desire = st.text_input(
+            "Désir immédiat",
+            placeholder="Ex. obtenir une nuit sans ordre de mon sire.",
+        )
         long_term_goal = st.text_input(
             "Ambition à long terme",
             placeholder="Ex. obtenir un Domaine, devenir indispensable à la Cour…",
         )
         chapter_goal = st.text_input(
             "Objectif du premier chapitre",
-            placeholder="Ex. comprendre mon sire, obtenir une autonomie de chasse…",
+            placeholder="Ex. obtenir une autonomie de chasse, comprendre mon sire…",
         )
         submitted = st.form_submit_button(
             "Commencer la chronique",
@@ -101,6 +148,9 @@ def _render_creation(store: ChronicleStore, player_id: str, default_player_name:
         return
     if not name.strip():
         st.error("Votre vampire doit avoir un nom.")
+        return
+    if not conviction.strip() or not touchstone.strip():
+        st.error("Une Conviction et une Pierre de touche sont nécessaires pour commencer.")
         return
 
     progress = store.get_progress(CHRONICLE_GAME_ID)
@@ -124,18 +174,36 @@ def _render_creation(store: ChronicleStore, player_id: str, default_player_name:
         progress=progress,
     )
     store.create_character(character)
+
+    profile = default_profile(character)
+    profile = replace(
+        profile,
+        convictions=(conviction.strip(),),
+        touchstones=(touchstone.strip(),),
+        road_affinity=road_affinity,
+        current_desire=(current_desire.strip() or profile.current_desire),
+        feeding_preference=(feeding_preference.strip() or profile.feeding_preference),
+    )
+    profile_store.save(profile)
+
+    simulation = simulation_store.ensure(CHRONICLE_GAME_ID, year=progress.year)
+    linked = ensure_character_links(simulation, character)
+    if linked != simulation:
+        simulation_store.save(linked)
+
     st.session_state["wod_last_chronicle_notice"] = (
         f"{character.name} a été Étreint en {character.embraced_year}. "
-        f"Son sire, {character.sire_name}, répond encore de lui devant les autres Caïnites."
+        f"{character.sire_name} répond encore de ses actes et lui ouvre un premier accès à la chasse."
     )
     st.rerun()
 
 
-def _render_header(character, progress) -> None:
+def _render_header(character, profile, progress) -> None:
     st.title(character.name)
     st.caption(
         f"{CLAN_LABELS[character.clan_id]} · {character.concept} · "
-        f"Étreint en {character.embraced_year} · {OFFICE_LABELS.get(character.office, character.office)}"
+        f"{profile.generation}e génération · Étreint en {character.embraced_year} · "
+        f"{OFFICE_LABELS.get(character.office, character.office)}"
     )
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("Année", progress.year)
@@ -144,29 +212,34 @@ def _render_header(character, progress) -> None:
     current_night = progress.nights_per_segment if character.ready_for_convergence else character.local_night
     col4.metric("Nuit", f"{current_night}/{progress.nights_per_segment}")
 
-    vital1, vital2, vital3, vital4, vital5 = st.columns(5)
+    vital1, vital2, vital3, vital4, vital5, vital6 = st.columns(6)
     vital1.metric("Faim", f"{character.hunger}/5")
     vital2.metric("Humanité", f"{character.humanity}/10")
-    vital3.metric("Statut", character.status)
-    vital4.metric("Influence", f"{character.personal_influence:.1f}")
-    vital5.metric("Expérience", character.experience)
+    vital3.metric("Volonté", profile.willpower)
+    vital4.metric("Statut", character.status)
+    vital5.metric("Influence", f"{character.personal_influence:.1f}")
+    vital6.metric("Expérience", character.experience)
 
 
-def _render_sire(character) -> None:
+def _render_sire(character, profile, era) -> None:
+    bond = sire_bond(character, profile, era)
     with st.container(border=True):
         try:
             sire = sire_for_id(character.sire_id)
         except ValueError:
             st.markdown(f"### Votre sire — {character.sire_name}")
             st.write(f"**Relation :** {character.sire_relation}/3")
-            st.caption("Votre sire appartient à votre lignée persistante.")
-            return
-        st.markdown(f"### Votre sire — {sire.name}")
-        st.caption(sire.title)
-        st.write(sire.description)
-        st.write(f"**Protection :** {sire.protection}")
-        st.write(f"**Attente :** {sire.expectation}")
-        st.write(f"**Relation :** {character.sire_relation}/3")
+        else:
+            st.markdown(f"### Votre sire — {sire.name}")
+            st.caption(sire.title)
+            st.write(sire.description)
+            st.write(f"**Protection :** {sire.protection}")
+            st.write(f"**Attente :** {sire.expectation}")
+            st.write(f"**Relation :** {character.sire_relation}/3")
+        st.write(bond.authority_text)
+        st.caption(bond.protection_text)
+        if bond.can_seek_release:
+            st.info("Votre position permet désormais d'envisager une négociation formelle d'autonomie.")
 
 
 def _render_journal(store: ChronicleStore, character) -> None:
@@ -189,14 +262,12 @@ def _render_journal(store: ChronicleStore, character) -> None:
 def _render_convergence(repo, store: ChronicleStore, character, progress) -> None:
     st.subheader("Convergence")
     st.write(
-        "Vos nuits personnelles de ce segment sont terminées. Le monde peut continuer à discuter et à "
-        "échanger, mais le prochain segment ne devient canonique qu'après la convergence."
+        "Vos nuits personnelles de ce segment sont terminées. Les messages et scènes restent accessibles, "
+        "mais le prochain état canonique de la cité sera fixé lors de cette convergence."
     )
     characters = [pc for pc in store.list_characters(character.game_id) if pc.is_active]
     current_characters = [
-        pc
-        for pc in characters
-        if pc.chapter == progress.chapter and pc.segment == progress.segment
+        pc for pc in characters if pc.chapter == progress.chapter and pc.segment == progress.segment
     ]
     ready = [pc for pc in current_characters if pc.ready_for_convergence]
     st.progress(len(ready) / max(1, len(current_characters)))
@@ -228,7 +299,7 @@ def _character_names(store: ChronicleStore, game_id: str) -> dict[str, str]:
     return {character.character_id: character.name for character in store.list_characters(game_id)}
 
 
-def _render_scenes(repo, store: ChronicleStore, character, progress) -> None:
+def _render_scenes(repo, store: ChronicleStore, character) -> None:
     scenes = ChronicleSceneStore(repo)
     characters = [
         pc
@@ -239,10 +310,8 @@ def _render_scenes(repo, store: ChronicleStore, character, progress) -> None:
 
     st.subheader("Scènes entre personnages")
     st.caption(
-        "Ces échanges sont asynchrones : vous pouvez ouvrir une scène puis continuer vos nuits. "
-        "L'autre joueur répondra lorsqu'il se reconnectera."
+        "Ces échanges sont asynchrones. Une demande peut rester ouverte pendant que chacun poursuit ses autres affaires."
     )
-
     if characters:
         with st.form(f"open_scene_{character.chapter}_{character.segment}_{character.local_night}"):
             target_id = st.selectbox(
@@ -265,7 +334,7 @@ def _render_scenes(repo, store: ChronicleStore, character, progress) -> None:
                     title=title,
                     opening_text=opening,
                 )
-                st.success("La scène a été transmise. Elle ne bloque pas votre progression personnelle.")
+                st.success("La scène a été transmise.")
                 st.rerun()
             except ValueError as exc:
                 st.error(str(exc))
@@ -280,9 +349,7 @@ def _render_scenes(repo, store: ChronicleStore, character, progress) -> None:
         with st.container(border=True):
             sender = names.get(scene.from_character_id, scene.from_character_id)
             st.markdown(f"**{scene.title}** — {sender}")
-            st.caption(
-                f"Chapitre {scene.chapter} · Segment {scene.segment} · Nuit {scene.night_number} · {scene.status}"
-            )
+            st.caption(f"Chapitre {scene.chapter} · Segment {scene.segment} · Nuit {scene.night_number}")
             st.write(scene.opening_text)
             if scene.response_text:
                 st.write(f"**Votre réponse :** {scene.response_text}")
@@ -292,11 +359,7 @@ def _render_scenes(repo, store: ChronicleStore, character, progress) -> None:
                     respond = st.form_submit_button("Envoyer la réponse", use_container_width=True)
                 if respond:
                     try:
-                        scenes.respond(
-                            scene,
-                            character_id=character.character_id,
-                            response_text=response,
-                        )
+                        scenes.respond(scene, character_id=character.character_id, response_text=response)
                         st.success("Réponse transmise.")
                         st.rerun()
                     except ValueError as exc:
@@ -316,30 +379,161 @@ def _render_scenes(repo, store: ChronicleStore, character, progress) -> None:
                 st.write(f"**Réponse :** {scene.response_text}")
 
 
-def _render_world(repo, progress) -> None:
-    st.subheader(f"{progress.year} — un ordre encore incertain")
-    st.write(
-        "Les anciens, les sires et les institutions poursuivent leurs propres intérêts. Ils n'attendent pas "
-        "les ordres des joueurs : leurs décisions deviennent visibles aux points de convergence."
-    )
+def _render_profile(character, profile) -> None:
+    identity = clan_identity(character.clan_id)
+    st.markdown("### Votre Sang")
+    st.write(identity.medieval_position)
+    st.write(f"**Fléau — {identity.bane_name} :** {identity.bane_text}")
+    st.write(f"**Génération :** {profile.generation}e")
+    st.write(f"**Puissance du Sang :** {profile.blood_potency}")
+    st.write(f"**Affinité de Voie :** {ROAD_LABELS.get(profile.road_affinity, profile.road_affinity)}")
+    st.write(f"**Conviction :** {profile.convictions[0]}")
+    st.write(f"**Pierre de touche :** {profile.touchstones[0]}")
+    st.write(f"**Désir actuel :** {profile.current_desire}")
+    if profile.feeding_preference:
+        st.write(f"**Préférence de chasse :** {profile.feeding_preference}")
+
+
+def _render_domain_and_debts(character, simulation, year: int) -> None:
+    st.subheader("Chasse et Domaine")
+    rights = active_hunting_access(simulation, character.character_id, year)
+    if not rights:
+        st.warning("Vous ne disposez actuellement d'aucun droit de chasse reconnu.")
+    for right in rights:
+        domain = simulation.domains[right.domain_id]
+        holder = simulation.npcs.get(domain.holder_id or "")
+        holder_name = holder.name if holder else (domain.holder_id or "sans détenteur reconnu")
+        with st.container(border=True):
+            st.markdown(f"**{domain.name}**")
+            st.write(domain.description)
+            st.write(f"Détenteur : **{holder_name}**")
+            st.write(
+                f"Viandis **{domain.viandis}/3** · Servage **{domain.servage}/3** · Rempart **{domain.rempart}/3**"
+            )
+            st.caption(f"Accès : {right.source} · Pression {domain.pressure} · Risque {domain.masquerade_risk}/3")
+
+    st.subheader("Faveurs et dettes")
+    relevant = [
+        boon for boon in simulation.boons.values()
+        if boon.creditor_id == character.character_id or boon.debtor_id == character.character_id
+    ]
+    if not relevant:
+        st.caption("Aucune faveur formalisée ne vous lie encore.")
+    for boon in relevant:
+        if boon.creditor_id == character.character_id:
+            direction = "On vous doit"
+            other_id = boon.debtor_id
+        else:
+            direction = "Vous devez"
+            other_id = boon.creditor_id
+        other = simulation.npcs.get(other_id)
+        other_name = other.name if other else other_id
+        st.write(f"- **{direction}** une faveur {boon.level} — {other_name} · {boon.status} · {boon.origin}")
+
+
+def _render_world(repo, character, simulation, progress) -> None:
+    era = era_for_year(progress.year)
+    st.subheader(f"{progress.year} — {era.label}")
+    st.write(era.public_context)
+    st.info(CAMARILLA_STAGE_LABELS.get(era.camarilla_stage.value, era.camarilla_stage.value))
+    if not era.primogen_council_standardized:
+        st.caption(
+            "Le Prince et des conseils locaux peuvent exister, mais le jeu ne suppose pas encore un Conseil des Primogènes standardisé."
+        )
+
+    st.markdown("### Pouvoirs visibles")
+    prince_id = simulation.offices.get("prince")
+    prince = simulation.npcs.get(prince_id or "")
+    if prince:
+        st.write(f"**Prince local :** {prince.name} — {prince.clan_id.title()}")
+    st.write(f"**Caïnites connus du moteur :** {len(simulation.npcs)} PNJ actifs ou persistants")
+
+    eligibilities = office_eligibility(character, simulation, era)
+    with st.expander("Votre accès aux fonctions politiques"):
+        for item in eligibilities:
+            state = "accessible" if item.available else "non institutionnalisé"
+            readiness = "éligible" if item.eligible else "pas encore éligible"
+            st.write(f"**{OFFICE_LABELS.get(item.office, item.office)}** — {state}, {readiness}")
+            st.caption(item.reason)
+
     events = ChronicleWorldStore(repo).list_events(CHRONICLE_GAME_ID, limit=20)
     if events:
         st.markdown("### Ce qui a changé autour de vous")
         for event in events:
             with st.container(border=True):
                 st.write(event["public_text"])
-                st.caption(
-                    f"{event['year']} · Chapitre {event['chapter']} · Segment {event['segment']}"
-                )
+                st.caption(f"{event['year']} · Chapitre {event['chapter']} · Segment {event['segment']}")
     else:
         st.caption("La première convergence n'a pas encore produit d'événement partagé.")
 
-    st.markdown("### Rythme de la chronique")
-    st.write(
-        f"Vous pouvez jouer jusqu'à **{progress.nights_per_segment} nuits personnelles** sans attendre les "
-        "autres. Les scènes PJ restent asynchrones. Une convergence rassemble ensuite les conséquences "
-        "avant le segment suivant."
+
+def _render_night(
+    store,
+    profile_store,
+    simulation_store,
+    character,
+    profile,
+    simulation,
+    progress,
+) -> None:
+    st.subheader(f"Nuit {character.local_night}")
+    st.write(f"**Objectif du chapitre :** {character.chapter_goal}")
+    st.caption(
+        f"Progression actuelle : {character.goal_progress}. Les propositions ci-dessous sont des situations, "
+        "pas une liste d'actions abstraites : choisissez celle que votre vampire décide réellement d'affronter."
     )
+
+    situations = generate_situations(character, profile, simulation, year=progress.year)
+    for situation in situations:
+        with st.container(border=True):
+            st.markdown(f"### {situation.title}")
+            st.write(situation.body)
+            with st.form(
+                f"situation_{character.chapter}_{character.segment}_{character.local_night}_{situation.id}"
+            ):
+                choice_id = st.radio(
+                    "Votre décision",
+                    options=[choice.id for choice in situation.choices],
+                    format_func=lambda value: next(
+                        choice.label for choice in situation.choices if choice.id == value
+                    ),
+                )
+                selected = next(choice for choice in situation.choices if choice.id == choice_id)
+                st.caption(selected.description)
+                free_intent = st.text_area(
+                    "Précision libre",
+                    placeholder="Votre manière d'agir, ce que vous cachez, ce que vous cherchez vraiment…",
+                    max_chars=500,
+                    key=f"intent_{situation.id}",
+                )
+                play = st.form_submit_button(
+                    "Jouer cette situation",
+                    type="primary",
+                    use_container_width=True,
+                )
+            if play:
+                resolution = resolve_situation(
+                    character,
+                    profile,
+                    simulation,
+                    situation,
+                    choice_id,
+                    nights_per_segment=progress.nights_per_segment,
+                    free_intent=free_intent,
+                )
+                store.advance_personal_night(
+                    character,
+                    resolution.outcome,
+                    free_intent=free_intent,
+                )
+                simulation_store.save(resolution.simulation)
+                profile_store.save(resolution.profile)
+                dice = resolution.dice
+                st.session_state["wod_last_chronicle_notice"] = (
+                    f"{resolution.outcome.summary} {resolution.outcome.detail} "
+                    f"[{dice.successes} succès sur difficulté {dice.difficulty}]"
+                )
+                st.rerun()
 
 
 def render_chronicle_app(
@@ -350,6 +544,8 @@ def render_chronicle_app(
     backend_label: str = "",
 ) -> None:
     store = _ensure_chronicle(repo)
+    profile_store = VampireProfileStore(repo)
+    simulation_store = ChronicleSimulationStore(repo)
     progress = store.get_progress(CHRONICLE_GAME_ID)
     if progress is None:
         st.error("Impossible d'initialiser la chronique.")
@@ -357,8 +553,20 @@ def render_chronicle_app(
 
     character = store.get_character(CHRONICLE_GAME_ID, player_id)
     if character is None:
-        _render_creation(store, player_id, player_name)
+        _render_creation(
+            store,
+            profile_store,
+            simulation_store,
+            player_id,
+            player_name,
+        )
         return
+
+    profile = profile_store.ensure_for_character(character)
+    simulation = simulation_store.ensure(CHRONICLE_GAME_ID, year=progress.year)
+    linked = ensure_character_links(simulation, character)
+    if linked != simulation:
+        simulation = simulation_store.save(linked)
 
     notice = st.session_state.pop("wod_last_chronicle_notice", None)
     if notice:
@@ -377,70 +585,42 @@ def render_chronicle_app(
         st.write(f"**Sire :** {character.sire_name}")
         st.write(f"**Fonction :** {OFFICE_LABELS.get(character.office, character.office)}")
 
-    _render_header(character, progress)
+    _render_header(character, profile, progress)
 
-    night_tab, scenes_tab, relations_tab, journal_tab, world_tab = st.tabs(
-        ["Cette nuit", "Scènes", "Mes liens", "Journal", "Le monde"]
+    night_tab, scenes_tab, relations_tab, domain_tab, journal_tab, world_tab = st.tabs(
+        ["Cette nuit", "Scènes", "Mes liens", "Domaine & dettes", "Journal", "Le monde"]
     )
 
     with night_tab:
         if character.ready_for_convergence:
             _render_convergence(repo, store, character, progress)
         else:
-            st.subheader(f"Nuit {character.local_night}")
-            st.info(nightly_hook(character))
-            st.write(f"**Objectif du chapitre :** {character.chapter_goal}")
-            st.caption(
-                f"Progression actuelle : {character.goal_progress}. Ce score sert au bilan du chapitre ; "
-                "il ne remplace pas les conséquences narratives."
+            _render_night(
+                store,
+                profile_store,
+                simulation_store,
+                character,
+                profile,
+                simulation,
+                progress,
             )
-            with st.form(f"personal_night_{character.chapter}_{character.segment}_{character.local_night}"):
-                action = st.selectbox(
-                    "Votre engagement principal cette nuit",
-                    options=list(PersonalAction),
-                    format_func=lambda value: ACTION_LABELS[value],
-                )
-                free_intent = st.text_area(
-                    "Précision libre",
-                    placeholder="Ex. je cherche le copiste aperçu hier et veux savoir qui l'emploie…",
-                    max_chars=500,
-                )
-                play = st.form_submit_button(
-                    "Jouer cette nuit",
-                    type="primary",
-                    use_container_width=True,
-                )
-            if play:
-                outcome = resolve_personal_night(
-                    character,
-                    action,
-                    nights_per_segment=progress.nights_per_segment,
-                    free_intent=free_intent,
-                )
-                store.advance_personal_night(character, outcome, free_intent=free_intent)
-                st.session_state["wod_last_chronicle_notice"] = (
-                    f"{outcome.summary} {outcome.detail}"
-                )
-                st.rerun()
 
     with scenes_tab:
-        _render_scenes(repo, store, character, progress)
+        _render_scenes(repo, store, character)
 
     with relations_tab:
-        _render_sire(character)
+        _render_sire(character, profile, era_for_year(progress.year))
+        _render_profile(character, profile)
         st.markdown("### Votre position")
         st.write(f"**Ambition :** {character.long_term_goal}")
         st.write(f"**Réputation :** {character.reputation:+d}")
-        st.write(f"**Discipline dominante :** {character.starting_discipline}")
         st.write(f"**Expérience accumulée :** {character.experience}")
-        st.write(f"**Fonction :** {OFFICE_LABELS.get(character.office, character.office)}")
-        st.caption(
-            "Le Primogénat, un Domaine ou la Praxis seront des positions politiques à obtenir. "
-            "Aucune fonction ne vous donne le contrôle direct des autres vampires."
-        )
+
+    with domain_tab:
+        _render_domain_and_debts(character, simulation, progress.year)
 
     with journal_tab:
         _render_journal(store, character)
 
     with world_tab:
-        _render_world(repo, progress)
+        _render_world(repo, character, simulation, progress)
