@@ -4,8 +4,8 @@ from dataclasses import dataclass
 from typing import Iterable, Mapping
 
 from .config import DEFAULT_RULES, GameRules
-from .coteries import coterie_influence, determine_coterie_stances, initialize_coteries
-from .models import Candidate, CoterieSide, CoterieStance, GameState, PrimogenVote
+from .factions import determine_faction_stances, faction_influence, initialize_factions
+from .models import Candidate, ClanFactionSide, FactionStance, GameState, PrimogenVote
 
 
 @dataclass(frozen=True)
@@ -22,14 +22,14 @@ class VoteResolution:
 def determine_current_stances(
     state: GameState,
     rules: GameRules = DEFAULT_RULES,
-) -> dict[str, CoterieStance]:
-    """Nom conservé pour compatibilité interne ; V0.8 raisonne par coterie."""
-    return determine_coterie_stances(state)
+) -> dict[str, FactionStance]:
+    """Alias historique conservé ; le moteur actif raisonne désormais en factions."""
+    return determine_faction_stances(state)
 
 
 def resolve_praxis_vote(
     state: GameState,
-    stances: Mapping[str, CoterieStance],
+    stances: Mapping[str, FactionStance],
     votes: Mapping[str, PrimogenVote],
     candidates: Iterable[Candidate],
     opposition_transfer_ratio: float = 0.5,
@@ -40,7 +40,7 @@ def resolve_praxis_vote(
     if not 0 <= recognition_threshold < 1:
         raise ValueError("recognition_threshold must be between 0 (inclusive) and 1")
 
-    initialize_coteries(state)
+    initialize_factions(state)
     candidate_map = {candidate.id: candidate for candidate in candidates}
     primogen_ids = {cs.clan.primogen_id for cs in state.clan_states.values()}
     primogen_weights = {primogen_id: 0.0 for primogen_id in primogen_ids}
@@ -48,8 +48,8 @@ def resolve_praxis_vote(
 
     for clan_id, clan_state in state.clan_states.items():
         own_primogen_id = clan_state.clan.primogen_id
-        primogen_influence = coterie_influence(state, clan_id, CoterieSide.PRIMOGEN)
-        opposition_influence = coterie_influence(state, clan_id, CoterieSide.OPPOSITION)
+        primogen_influence = faction_influence(state, clan_id, ClanFactionSide.PRIMOGEN)
+        opposition_influence = faction_influence(state, clan_id, ClanFactionSide.OPPOSITION)
         primogen_weights[own_primogen_id] += primogen_influence
 
         stance = stances.get(clan_id)
