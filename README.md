@@ -1,253 +1,266 @@
-# WoD RPG - prototype politique multijoueur
+# WoD RPG — Chronique vampirique persistante
 
-Jeu politique vampirique persistant et principalement asynchrone, développé en Python + Streamlit.
+Jeu de rôle vampirique solo et persistant, développé en Python + Streamlit, inspiré de Vampire et centré sur l'évolution d'un personnage dans une société caïnite autonome.
 
 Application stable : https://wod-rpg.streamlit.app
 
-## Périmètre du MVP
+## Direction actuelle
 
-Le MVP reste limité à **Brujah, Toreador et Ventrue**. Chaque joueur contrôle un clan mais incarne directement son **Primogène**. Les autres vampires du clan sont des acteurs politiques distincts avec leurs propres ambitions, relations, Humanité, Statut, réputation, faveurs, griefs, coteries et intérêts territoriaux.
+La production n'est plus un jeu où chaque joueur contrôle un clan ou incarne obligatoirement un Primogène.
 
-Le cœur du jeu reste : **pouvoir, influence, information, relations, Prestation et conséquences persistantes**. Les Domaines ne transforment pas le jeu en jeu de conquête.
+**Un joueur contrôle un seul vampire.** Il commence comme un infant récemment Étreint, encore dépendant de son sire, puis évolue librement au fil des nuits, des années et des conséquences de ses choix.
 
-## Modèle politique
+Le personnage peut devenir influent, obtenir un Domaine, accumuler des faveurs, se faire des ennemis, participer aux intrigues de Cour et éventuellement atteindre une fonction politique comme représentant de clan, Primogène ou Prince. Aucune carrière n'est imposée.
 
-Chaque vampire possède notamment :
+Le cœur du jeu reste : **pouvoir, information, relations, Prestation, influence, territoire et conséquences persistantes**.
 
-- un rapport aux mortels : **Humaniste / Prédateur** ;
-- un rapport à l'ordre : **Orthodoxe / Réformateur** ;
-- une Humanité réelle de 0 à 10 ;
-- Physique, Social et Mental de 0 à 2 ;
-- Expertises, Disciplines et Historiques ;
-- un Rang de Sang ;
-- une influence personnelle ;
-- un Statut de 0 à 5 ;
-- une réputation de -3 à +3 ;
-- une ambition politique active ;
-- des relations personnelles.
+## Point de départ
 
-La résolution de base reste compacte :
+La Chronique commence en **1435**.
+
+Le personnage est un vampire jeune :
+
+- récemment Étreint ;
+- sous la responsabilité de son sire ;
+- sans fonction politique ;
+- avec un Statut et une influence faibles ;
+- dépendant d'autrui pour son premier droit de chasse ;
+- plongé dans une société vampirique qui existait avant lui et continue d'agir sans lui.
+
+Les clans jouables initiaux restent :
+
+- Brujah ;
+- Toreador ;
+- Ventrue.
+
+Le clan détermine le Sang, les Disciplines, le Fléau et certains accès ou situations, mais le joueur ne contrôle pas les autres membres de son clan.
+
+## Création du vampire
+
+La création actuelle utilise notamment :
+
+- clan ;
+- origine mortelle ;
+- Conviction ;
+- Discipline dominante ;
+- restriction de chasse Ventrue lorsque nécessaire ;
+- sire déterminé à partir du profil de création.
+
+Les personnages joueurs suivent actuellement **Via Humanitas**.
+
+Le personnage démarre sans fonction politique. Les offices sont des positions du monde, pas des classes ou niveaux automatiques.
+
+## Boucle de jeu
+
+La Chronique est organisée en nuits personnelles, segments et chapitres.
 
 ```text
-Caractéristique + Expertise éventuelle (+1) + meilleure Discipline OU meilleur Historique pertinent
+Situation de la nuit
+        |
+Décision du joueur
+        |
+Jet de dés / Faim / conséquences
+        |
+Modification du personnage et du monde
+        |
+Nuit suivante
+        |
+Fin du segment
+        |
+Convergence solo : le monde agit
+        |
+PNJ / Domaines / politique / événements
+        |
+Segment suivant
+        |
+Fin du chapitre
+        |
+Progression + éventuelle ellipse historique
 ```
 
-## Factions internes
+Le joueur ne doit attendre aucun autre joueur pour faire avancer sa Chronique.
 
-Une **faction** est un camp politique interne au clan. Chaque clan possède actuellement :
+## V0.42 — Chronique personnelle
 
-1. la **Faction du Primogène** ;
-2. la **Faction d'opposition**.
+Chaque compte possède désormais sa propre instance de Chronique persistante.
 
-Le Primogène représente officiellement le clan mais ne commande pas automatiquement tous ses membres. L'opposition possède son propre chef et ses propres intérêts.
+L'identifiant de partie est dérivé de manière déterministe du compte sans exposer directement son identifiant. Cela isole :
 
-La relation effective au Primogène combine la relation personnelle 0–2 et l'affinité politique :
+- personnage ;
+- chronologie ;
+- historique des nuits ;
+- simulation politique ;
+- Domaines ;
+- faveurs ;
+- événements du monde.
 
-- deux positions identiques : +1 ;
-- une position identique : 0 ;
-- deux positions opposées : -1.
+Les anciennes sauvegardes V0.21–V0.41 stockées dans la Chronique partagée `chronicle_1435` sont migrées de manière non destructive vers une instance personnelle. L'ancienne sauvegarde reste intacte.
 
-## Coteries transclaniques — V0.11
+Lors de la migration, les références directes aux autres anciens PJ sont retirées, mais l'état persistant des PNJ, Domaines et institutions est conservé lorsque possible.
 
-Une **coterie** est désormais un véritable petit groupe de vampires et reste totalement distincte d'une faction interne. Elle peut unir des membres de plusieurs clans dont les intérêts institutionnels divergent.
+Aucune migration SQL structurelle n'est nécessaire pour V0.42 : les tables Chronicle utilisent déjà `game_id` comme frontière de persistance.
 
-Trois coteries structurent le MVP initial :
+## Monde persistant
 
-- **La Concorde des Trois** — Camille Vernier, Helene Beaumont, Ines Le Floch ;
-- **Les Cendres Libres** — Claire Beaumont, Lucien Marceau, Sarah Morel ;
-- **Le Pacte de Fer** — Victor de Keravel, Gabriel Sorel, Yann Kergoat.
+Le monde contient des vampires PNJ avec notamment :
 
-Chaque coterie possède un chef, un objectif et une cohésion de base. La cohésion effective n'est pas une nouvelle jauge opaque : elle est calculée à partir des **relations personnelles** et des **griefs persistants** de ses membres.
+- clan ;
+- rôle ;
+- ambition ;
+- objectif court terme ;
+- loyauté ;
+- agressivité ;
+- influence ;
+- Statut ;
+- attitude politique ;
+- progression d'agenda ;
+- relations persistantes.
 
-Les coteries créent des loyautés croisées :
+Les PNJ agissent lors des convergences. Le joueur n'est pas le centre mécanique du monde : il est un acteur parmi d'autres.
 
-- un compagnon étranger est connu au niveau identité sans révéler sa faction interne ou ses griefs ;
-- **Diplomatie** et **Enquête** bénéficient d'un accès supplémentaire entre compagnons ;
-- **Fragiliser**, **Débaucher**, **Infiltrer** ou **Braconner** contre un compagnon crée un conflit de loyauté ;
-- un PNJ peu lié à son Primogène peut refuser une mission hostile envers un compagnon d'une coterie soudée ;
-- un membre très fidèle au Primogène peut obéir malgré tout, mais avec un malus d'exécution ;
-- une trahison détectée dégrade les relations concernées et peut affaiblir durablement la cohésion de la coterie.
+## Sire et émancipation
 
-Les refus sont déterministes : ils dépendent de la cohésion, des relations, des griefs et de la relation effective au Primogène, jamais d'un tirage aléatoire opaque.
+Le sire est une relation structurante des premières nuits.
 
-## Prestation, griefs et promesses
+Il apporte :
 
-Les faveurs sont des obligations persistantes : mineure, majeure ou dette de vie. Elles possèdent un créancier, un débiteur, une origine et un statut. Honorer une faveur améliore la réputation ; la refuser peut créer un grief et dégrader fortement la crédibilité du débiteur.
+- protection ;
+- introductions ;
+- accès initial à la chasse ;
+- attentes et obligations ;
+- responsabilité politique pour les actes de l'infant.
 
-Les tensions politiques ne reposent pas sur une jauge opaque. Elles sont enregistrées comme **griefs explicites** avec auteur, cible, cause et gravité.
+Lorsque le personnage devient suffisamment autonome, il peut demander sa libération. Une émancipation réussie retire notamment le droit implicite de chasser sous la responsabilité du sire.
 
-Les PNJ peuvent adresser des requêtes au Primogène. Celui-ci peut accepter, refuser, négocier ou promettre. Les promesses ont une échéance et peuvent être **honorées explicitement avant les missions de nuit**.
+## Faim et résolution
 
-## Domaines — V0.10
+Les situations utilisent le profil Vampire du personnage, les compétences, les attributs et les dés de Faim.
 
-Un Domaine est une ressource politique personnelle, pas une case appartenant automatiquement au clan ou au Primogène.
+Les résultats peuvent produire :
 
-Chaque Domaine possède trois caractéristiques de 0 à 3 :
+- succès ;
+- succès critique ;
+- critique bestial ;
+- échec ;
+- échec bestial ;
+- progression ;
+- réputation ;
+- influence ;
+- modification de relations ou de ressources.
 
-- **Viandis** : richesse et capacité nourricière du Domaine ;
-- **Servage** : implantation et emprise sur les mortels et réseaux locaux ;
-- **Rempart** : contrôle, sécurité et capacité à détecter les intrusions.
+La direction cible est de remplacer progressivement les effets génériques par des conséquences directement liées aux acteurs et ressources réels du monde.
 
-Il possède également une pression territoriale et un risque de Mascarade.
+## Domaines
 
-### Six Domaines initiaux
+Un Domaine est une ressource politique personnelle, jamais une simple case de conquête.
 
-La ville commence volontairement avec six Domaines asymétriques :
+Chaque Domaine utilise :
 
-- Quartier des Affaires — Adrien de Keravel ;
-- Vieux-Centre — Claire Beaumont ;
-- Quartier des Arts — Elise Valmont ;
-- Campus et Hôpital — Camille Vernier ;
-- Les Docks — Marcus Le Guen ;
-- Les Faubourgs — Sarah Morel.
+- **Viandis** : richesse nourricière ;
+- **Servage** : implantation dans les réseaux mortels ;
+- **Rempart** : contrôle et sécurité ;
+- pression ;
+- risque pour la discrétion vampirique.
 
-Des membres de l'opposition détiennent donc déjà des Domaines. La Primogéniture et la propriété territoriale sont volontairement séparées.
+Détenir un Domaine et disposer du droit d'y chasser restent deux choses distinctes.
 
-## Droits de chasse
+Un personnage peut devenir politiquement important sans posséder de Domaine.
 
-Détenir un Domaine et disposer du droit d'y chasser sont deux choses différentes.
+## Prestation
 
-Un droit de chasse possède :
+Les faveurs sont des obligations persistantes entre vampires.
 
-- un Domaine ;
-- un bénéficiaire ;
-- un accordeur ;
-- une durée précise en nuits ;
-- des conditions ;
-- éventuellement une faveur de Prestation associée ;
-- un statut actif, révoqué, expiré ou contesté.
+Les niveaux actuellement reconnus sont :
 
-Le détenteur peut accorder ou retirer des droits sur son Domaine. Le **Prince reconnu** peut également arbitrer les droits et dispose côté moteur de la prérogative de réattribuer ou retirer un Domaine personnel. Une réattribution contestée peut devenir un litige public.
+- mineure ;
+- majeure ;
+- dette de vie.
 
-Une succession de Primogène ne transfère jamais automatiquement les Domaines personnels du titulaire sortant.
+Elles possèdent un créancier, un débiteur, une origine, un statut et peuvent être publiques ou privées.
 
-## Pression territoriale
+À terme, la Prestation doit être un des principaux moteurs de progression politique plutôt qu'une simple monnaie abstraite.
 
-Le Viandis n'est pas une production abstraite de points. Il limite politiquement la quantité d'exploitation supportable.
+## Politique et offices
 
-- trop de droits de chasse actifs par rapport au Viandis augmentent la pression ;
-- le braconnage augmente également la pression ;
-- le détenteur peut utiliser l'action **Administrer son Domaine** et son Servage pour réduire cette pression ;
-- une pression excessive peut provoquer un incident local et endommager la Mascarade.
+Le monde politique est stocké dans un état canonique commun aux PJ et PNJ.
 
-## Intrusion, Rempart et braconnage
+Les fonctions actuellement modélisées comprennent notamment :
 
-Actions territoriales V0.10 :
+- détenteur de Domaine ;
+- représentant du clan ;
+- Primogène ;
+- Prince.
 
-- **Administrer son Domaine** ;
-- **Infiltrer un Domaine** ;
-- **Braconner sur un Domaine**.
+Prince et Primogène sont deux fonctions distinctes et ne peuvent pas être détenues simultanément par le même vampire.
 
-Le Rempart s'oppose aux intrusions. Une infiltration réussie peut améliorer le renseignement territorial. Une intrusion ou un braconnage détecté peut produire :
+Les fonctions dépendent aussi de l'époque : le moteur ne suppose pas qu'une institution moderne existe déjà en 1435.
 
-- grief personnel ;
-- litige territorial ;
-- information dans les rapports concernés ;
-- pression supplémentaire ;
-- conséquences ultérieures sur la Mascarade.
+Le joueur pourra accéder à ces fonctions uniquement si son parcours, le contexte et les rapports de force le permettent.
 
-Un membre de l'opposition conserve son autonomie : une action territoriale ordonnée par le joueur peut encore être refusée si elle ne sert pas suffisamment ses intérêts. Depuis la V0.11, une loyauté de coterie peut également entrer en conflit avec cet ordre.
+## Chronologie historique
 
-## Politique territoriale et requêtes
+Le moteur est sensible à l'époque.
 
-L'ambition **Obtenir un Domaine** produit une demande concrète de droit de chasse lorsqu'un Domaine du Primogène est disponible.
+Les chapitres peuvent produire des ellipses de plusieurs années et traverser des étapes historiques qui modifient progressivement :
 
-Le Primogène peut :
+- institutions ;
+- rapports de pouvoir ;
+- Révolte Anarch ;
+- coalition proto-Camarilla ;
+- Camarilla institutionnelle ;
+- pression des chasseurs ;
+- fonctions politiques disponibles.
 
-- accepter et concéder l'accès ;
-- négocier l'accès contre une faveur ;
-- refuser et créer potentiellement un grief ;
-- promettre l'accès pour une nuit ultérieure.
-
-Une promesse territoriale honorée crée effectivement le droit de chasse avant les missions de la nuit.
+L'histoire fournit un cadre, mais le monde local et le personnage conservent leurs conséquences propres.
 
 ## Brouillard de guerre
 
-Le nom d'un Domaine et son détenteur officiel sont publics.
+Le moteur possède déjà la notion d'intention cachée pour les actions autonomes du monde.
 
-Restent privés ou soumis au renseignement :
+La prochaine étape est d'en faire un véritable système d'information imparfaite : le personnage ne doit pas connaître automatiquement les ambitions, relations, dettes et projets secrets des PNJ.
 
-- Viandis, Servage et Rempart des Domaines étrangers ;
-- pression réelle ;
-- droits privés ;
-- certains litiges ;
-- intrusions non détectées ;
-- factions internes, ambitions, griefs et relation au Primogène des vampires étrangers.
+## Atelier legacy
 
-Une coterie révèle naturellement l'identité de ses compagnons étrangers au clan concerné, mais pas leurs informations politiques privées. Le renseignement territorial reste séparé du renseignement sur les personnages.
+L'application conserve un **Mode Atelier legacy (test/dev)** isolé de la Chronique de production.
 
-## Praxis
+Il contient l'ancien moteur politique centré sur Brujah, Toreador et Ventrue et permet de basculer entre les clans sans authentification.
 
-Le vote des Primogènes reste un **mécanisme local de reconnaissance de la Praxis**, pas une procédure universelle de la Camarilla.
+Cet Atelier sert de banc de test et de réservoir de mécaniques historiques. Il ne définit plus la boucle principale du jeu et ne doit jamais écrire dans une Chronique personnelle de production.
 
-Si l'opposition refuse de suivre son Primogène, son influence est divisée selon `opposition_transfer_ratio`, configurable et fixé à 50 % par défaut.
+## Persistance
 
-## Cycle d'une nuit V0.11
+GitHub contient :
 
-```text
-Requêtes / promesses / Prestation
-        |
-Décisions du Primogène
-        |
-Promesses honorées
-        |
-Concessions ou révocations territoriales
-        |
-Une mission par vampire
-        |
-Conflits de loyauté faction / Primogène / coterie
-        |
-Validation des trois clans
-        |
-Résolution simultanée
-        |
-Praxis / Étreintes
-        |
-Réactions autonomes
-        |
-Pression territoriale / Mascarade
-        |
-Rapports privés
-        |
-Nuit suivante
-```
+- code ;
+- configuration ;
+- contenus statiques ;
+- tests ;
+- schémas reproductibles.
 
-## Compatibilité et persistance
+GitHub n'est jamais utilisé comme sauvegarde dynamique des parties.
 
-Aucune migration SQL Supabase n'est requise pour V0.11. Les coteries initiales sont du contenu statique ; leur évolution utilise les relations et griefs déjà stockés dans le `state_json`.
+La persistance de production utilise Supabase. SQLite reste utilisé pour les tests et l'exécution locale.
 
-La lecture reste rétrocompatible :
+## Architecture principale
 
-- sauvegardes V0.6/V0.7/V0.8/V0.9/V0.10 conservées ;
-- anciennes `coterie_memberships` converties en `faction_memberships` — ce nom legacy ne désigne pas les coteries V0.11 ;
-- sauvegardes V0.9 sans Domaines enrichies automatiquement avec les six Domaines initiaux ;
-- les liens initiaux de coterie sont reconstruits sans écraser une relation déjà dégradée ;
-- ordres V0.7, V0.8, V0.9 et V0.10 toujours lisibles et résolubles ;
-- les ordres actuels restent en `version = 4` car V0.11 n'ajoute aucun nouveau type d'ordre ;
-- la nuit de production déjà soumise au format legacy reste explicitement couverte par les tests.
-
-GitHub contient le code et les contenus statiques, jamais les sauvegardes vivantes.
-
-## Architecture
-
-- `game/models.py` : modèles de domaine ;
-- `game/factions.py` : politique interne aux clans ;
-- `game/coteries.py` : coteries transclaniques, cohésion et conflits de loyauté ;
-- `game/coterie_ui.py` : vue Streamlit des coteries ;
-- `game/social_politics.py` : Prestation, griefs, promesses et requêtes ;
-- `game/domains.py` : Domaines, droits de chasse, Viandis, Servage, Rempart, pression et litiges ;
-- `game/actions.py` : actions individuelles et effets des loyautés croisées ;
-- `game/autonomy.py` : réactions autonomes déterministes ;
-- `game/politics.py` : reconnaissance de Praxis ;
-- `game/offices.py` : Prince, Primogènes et successions ;
-- `game/embrace.py` : Étreintes ;
-- `game/resolution.py` : pipeline global d'une nuit ;
-- `game/serialization.py` : sérialisation et migrations rétrocompatibles ;
-- `game/multiplayer.py` : orchestration asynchrone ;
-- `game/persistence.py`, `game/supabase_repository.py` : persistance ;
-- `game/runtime.py` : séparation Chronique / Atelier et initialisation runtime ;
-- `app.py`, `game_ui.py` : interface Streamlit ;
-- `tests/` : tests automatisés et smoke tests Streamlit.
+- `game/chronicle.py` : personnage, progression et actions personnelles historiques ;
+- `game/chronicle_instance.py` : isolation d'une Chronique personnelle par compte et migration legacy ;
+- `game/chronicle_store.py` : persistance du personnage, nuits et progression ;
+- `game/chronicle_simulation.py` : PNJ, Domaines, faveurs, droits de chasse et simulation ;
+- `game/chronicle_simulation_store.py` : persistance de la simulation ;
+- `game/chronicle_politics.py` : état politique canonique PJ/PNJ ;
+- `game/chronicle_offices.py` : éligibilité aux fonctions ;
+- `game/chronicle_service.py` : convergence et progression du monde ;
+- `game/chronicle_world_store.py` : historique des événements du monde ;
+- `game/situations.py` : situations jouables et résolutions ;
+- `game/vampire_profile.py` : fiche Vampire ;
+- `game/vampire_profile_store.py` : persistance de la fiche ;
+- `game/era.py` : règles et institutions selon l'époque ;
+- `game/chronicle_ui.py` : interface de la Chronique ;
+- `app.py` : launcher, authentification et séparation Chronique / Atelier ;
+- `game/` historique : moteur politique legacy conservé pour l'Atelier ;
+- `supabase/chronicle_schema.sql` : schéma reproductible de la Chronique ;
+- `tests/` : tests automatisés.
 
 ## Tests
 
@@ -255,11 +268,17 @@ GitHub contient le code et les contenus statiques, jamais les sauvegardes vivant
 pytest -q
 ```
 
-## Suite cible
+La CI GitHub exécute la suite complète sur chaque pull request et chaque push vers `main`.
 
-1. Prince comme acteur politique autonome ;
-2. résolution et arbitrage avancés des litiges territoriaux ;
-3. rumeurs, secrets et information imparfaite ;
-4. Étreintes davantage reliées à la Prestation, aux coteries et aux Domaines ;
-5. institutions, stabilité, Mascarade et factions PNJ ;
-6. approfondissement des coteries : engagements communs, secrets et ressources partagées.
+## Priorités après V0.42
+
+1. enrichir les PNJ en véritable société vampirique autonome ;
+2. mémoire relationnelle persistante entre le PJ et les PNJ ;
+3. situations générées par l'état réel du monde ;
+4. rumeurs, secrets et information imparfaite ;
+5. progression sociale fondée sur des relations et ressources concrètes ;
+6. approfondissement Domaines et droits de chasse ;
+7. accès organique aux fonctions politiques ;
+8. boucle longue sur plusieurs décennies et évolution historique.
+
+Le principe directeur reste : **le personnage commence petit, le monde existe sans lui, et son importance éventuelle doit être gagnée par le jeu**.
