@@ -5,11 +5,12 @@ from dataclasses import dataclass, field
 
 @dataclass(frozen=True)
 class ParisNpcSeed:
-    """Lore-backed identity plus WoD-rpg's 1435 simulation interpretation.
+    """Backward-compatible aggregate used by the current Paris simulation.
 
-    Dates, clan, generation and lineage are source facts when supplied. Scores,
-    agendas and relation values are simulation data created by WoD-rpg and are
-    deliberately not presented as published canon.
+    V0.47a no longer treats ``source_tier`` as the provenance of the whole
+    object. Canon facts, dates and contradictions live in ``paris_corpus.py``
+    with provenance per fact. The scores, agendas and relations below are
+    explicitly WoD-rpg simulation seeds.
     """
 
     id: str
@@ -44,6 +45,7 @@ class ParisFactionSeed:
     influence: float
     source_keys: tuple[str, ...]
     source_tier: str = "B"
+    member_clans: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -81,7 +83,7 @@ PARIS_1435_NPCS: tuple[ParisNpcSeed, ...] = (
     ParisNpcSeed(
         id="npc_saviarre",
         name="Saviarre",
-        clan_id="unknown",
+        clan_id="ventrue",
         role_1435="Conseillère d'Alexandre",
         ambition_1435="Préserver Alexandre et la continuité de son pouvoir dans une période où il délègue davantage",
         short_goal_1435="Maintenir les fidèles du Prince en contact et éviter l'effondrement de la Cour",
@@ -90,8 +92,11 @@ PARIS_1435_NPCS: tuple[ParisNpcSeed, ...] = (
         influence=7.0,
         status=4,
         camarilla_attitude=1,
-        source_keys=("alexandre", "alexandre_pouvoir", "chronologie"),
-        source_tier="A",
+        embraced_year=481,
+        generation=5,
+        sire_id="npc_alexandre",
+        source_keys=("alexandre", "alexandre_pouvoir", "chronologie", "lignees_ventrue"),
+        source_tier="B",
         territorial_interest="Cour d'Alexandre",
         active_plan="Coordonner les soutiens encore loyaux au Prince pendant que la situation mortelle fragilise son emprise.",
         relations={"npc_alexandre": 3},
@@ -236,6 +241,7 @@ PARIS_1435_FACTIONS: tuple[ParisFactionSeed, ...] = (
         member_ids=("npc_alexandre", "npc_saviarre", "npc_magnerius", "npc_pompignan"),
         influence=8.0,
         source_keys=("alexandre_pouvoir", "chronologie"),
+        member_clans=("ventrue",),
     ),
     ParisFactionSeed(
         id="faction_toreador_paris",
@@ -244,6 +250,7 @@ PARIS_1435_FACTIONS: tuple[ParisFactionSeed, ...] = (
         member_ids=("npc_beatrix", "npc_villon", "npc_violetta"),
         influence=7.5,
         source_keys=("alexandre_pouvoir", "beatrix", "francois_villon", "violetta"),
+        member_clans=("toreador",),
     ),
     ParisFactionSeed(
         id="faction_court_miracles",
@@ -252,6 +259,7 @@ PARIS_1435_FACTIONS: tuple[ParisFactionSeed, ...] = (
         member_ids=(),
         influence=7.0,
         source_keys=("alexandre_pouvoir",),
+        member_clans=("brujah", "malkavian", "gangrel", "nosferatu"),
     ),
 )
 
