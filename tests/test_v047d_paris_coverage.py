@@ -93,8 +93,9 @@ def test_critical_1435_gaps_remain_visible_instead_of_being_marked_complete():
 
 def test_lore_audit_report_lists_priority_1435_gaps_by_name():
     report = build_report(1435)
-    assert report["schema_version"] == 2
+    assert report["schema_version"] == 3
     assert report["coverage"]["areas_total"] == len(EXPECTED_MASTER_AREAS)
+    assert report["roster_1435"]["entries_total"] > 0
     incomplete_ids = {item["id"] for item in report["priority_1435_incomplete"]}
     assert "characters" in incomplete_ids
     assert "blood_bonds" in incomplete_ids
