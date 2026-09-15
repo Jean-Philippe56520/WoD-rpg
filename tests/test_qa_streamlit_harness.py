@@ -56,8 +56,6 @@ def _night_state(tmp_path, scenario_id: str):
     )
     if state is not None:
         return state
-    # qa_snapshot does not expose the personal game id; the table is keyed by
-    # player as well, so read it through the current Chronicle character.
     delegate = getattr(repo, "delegate", repo)
     with delegate._connect() as con:
         row = con.execute(
@@ -65,6 +63,16 @@ def _night_state(tmp_path, scenario_id: str):
             (qa_player_id(scenario_id),),
         ).fetchone()
     return NightCycleStore._from_row(dict(row)) if row else None
+
+
+def _chronicle_time(tmp_path, scenario_id: str):
+    repo = _repo(tmp_path, scenario_id)
+    delegate = getattr(repo, "delegate", repo)
+    with delegate._connect() as con:
+        row = con.execute(
+            "SELECT month,minimum_cycles_per_chapter,cycle_months FROM wod_chronicle_time LIMIT 1"
+        ).fetchone()
+    return dict(row) if row else None
 
 
 def test_qa_harness_opens_on_isolated_first_night(monkeypatch, tmp_path):
@@ -75,6 +83,8 @@ def test_qa_harness_opens_on_isolated_first_night(monkeypatch, tmp_path):
     assert any("Agnès de Chartres" in value for value in _text_values(app.title))
     assert any("aucune écriture Supabase" in value for value in _text_values(app.error))
     assert any("Événement de la nuit" in value for value in _text_values(app.markdown))
+    rendered = _text_values(app.markdown) + _text_values(app.caption)
+    assert any("Nuit significative" in value for value in rendered)
 
     snapshot = qa_snapshot(_repo(tmp_path, "first_night"), "first_night")
     assert snapshot["world"]["prince_id"] == "npc_alexandre"
@@ -187,19 +197,50 @@ def test_prestation_fixture_is_visible_in_relationship_state(monkeypatch, tmp_pa
     assert any("Prestation" in value for value in rendered_text)
 
 
-def test_convergence_button_advances_world_and_resets_local_night(monkeypatch, tmp_path):
+def test_narrative_convergence_offers_continue_or_close(monkeypatch, tmp_path):
     app = _select_scenario(_app(monkeypatch, tmp_path), "convergence_ready")
     before = qa_snapshot(_repo(tmp_path, "convergence_ready"), "convergence_ready")
-    assert before["character"]["ready_for_convergence"] is True
-    assert before["progress"]["segment"] == 1
 
-    _button_by_label(app, "Faire avancer le monde").click().run()
+    assert before["character"]["ready_for_convergence"] is True
+    assert before["character"]["goal_progress"] == 5
+    assert before["progress"]["segment"] == 2
+    assert _buttons_by_label(app, "Continuer le chapitre")
+    assert _buttons_by_label(app, "Clore le chapitre")
+    assert not _buttons_by_label(app, "Faire avancer le monde")
+
+
+def test_continuing_chapter_advances_cycle_without_resetting_arc(monkeypatch, tmp_path):
+    app = _select_scenario(_app(monkeypatch, tmp_path), "convergence_ready")
+    _button_by_label(app, "Continuer le chapitre").click().run()
     assert not app.exception
 
     after = qa_snapshot(_repo(tmp_path, "convergence_ready"), "convergence_ready")
-    assert after["progress"]["segment"] == 2
+    assert after["progress"]["chapter"] == 1
+    assert after["progress"]["segment"] == 3
+    assert after["progress"]["year"] == 1435
     assert after["character"]["local_night"] == 1
+    assert after["character"]["goal_progress"] == 5
     assert after["character"]["ready_for_convergence"] is False
+    time_state = _chronicle_time(tmp_path, "convergence_ready")
+    assert time_state is not None
+    assert time_state["month"] == 2
+
+
+def test_closing_chapter_uses_short_infant_ellipse_and_resets_arc(monkeypatch, tmp_path):
+    app = _select_scenario(_app(monkeypatch, tmp_path), "convergence_ready")
+    _button_by_label(app, "Clore le chapitre").click().run()
+    assert not app.exception
+
+    after = qa_snapshot(_repo(tmp_path, "convergence_ready"), "convergence_ready")
+    assert after["progress"]["chapter"] == 2
+    assert after["progress"]["segment"] == 1
+    assert after["progress"]["year"] == 1435
+    assert after["character"]["local_night"] == 1
+    assert after["character"]["goal_progress"] == 0
+    assert after["character"]["ready_for_convergence"] is False
+    time_state = _chronicle_time(tmp_path, "convergence_ready")
+    assert time_state is not None
+    assert time_state["month"] == 3
 
 
 def test_reset_button_restores_scenario_fixture_and_night_state(monkeypatch, tmp_path):
