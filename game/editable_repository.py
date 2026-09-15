@@ -3,14 +3,17 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from .models import ClanNightOrders, NightStatus
+from .models import ClanNightOrders, GameState, NightStatus
 from .persistence import SQLiteGameRepository
 from .serialization import clan_orders_from_json
 from .supabase_repository import SupabaseGameRepository
 
 
+PRODUCTION_GAME_ID = "main"
+
+
 class EditableSQLiteGameRepository(SQLiteGameRepository):
-    """SQLite local avec consultation et retrait des ordres soumis."""
+    """SQLite local avec consultation, retrait des ordres et reset de sandbox."""
 
     def get_submitted_orders(self, game_id: str, clan_id: str) -> ClanNightOrders | None:
         info = self.get_game_info(game_id)
@@ -54,9 +57,24 @@ class EditableSQLiteGameRepository(SQLiteGameRepository):
                 raise ValueError("No submitted orders found for this clan and night")
             con.commit()
 
+    def reset_game(
+        self,
+        game_id: str,
+        name: str,
+        state: GameState,
+        required_clans: tuple[str, ...],
+    ) -> None:
+        if game_id == PRODUCTION_GAME_ID:
+            raise ValueError("The production game cannot be reset")
+        with self._connect() as con:
+            con.execute("BEGIN IMMEDIATE")
+            con.execute("DELETE FROM games WHERE id = ?", (game_id,))
+            con.commit()
+        self.ensure_game(game_id, name, state, required_clans)
+
 
 class EditableSupabaseGameRepository(SupabaseGameRepository):
-    """Supabase serveur avec consultation et retrait atomique des ordres."""
+    """Supabase serveur avec consultation, retrait des ordres et reset de sandbox."""
 
     def get_submitted_orders(self, game_id: str, clan_id: str) -> ClanNightOrders | None:
         info = self.get_game_info(game_id)
@@ -83,3 +101,20 @@ class EditableSupabaseGameRepository(SupabaseGameRepository):
                 "p_clan_id": clan_id,
             },
         )
+
+    def reset_game(
+        self,
+        game_id: str,
+        name: str,
+        state: GameState,
+        required_clans: tuple[str, ...],
+    ) -> None:
+        if game_id == PRODUCTION_GAME_ID:
+            raise ValueError("The production game cannot be reset")
+        self.client._request(
+            "DELETE",
+            "/wod_games",
+            params={"id": f"eq.{game_id}"},
+            prefer="return=minimal",
+        )
+        self.ensure_game(game_id, name, state, required_clans)
