@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import replace
 import uuid
 
 import streamlit as st
@@ -24,22 +23,22 @@ from .chronicle_simulation_store import ChronicleSimulationStore
 from .chronicle_store import ChronicleStore
 from .chronicle_world_store import ChronicleWorldStore
 from .clans import clan_identity
+from .creation_rules import (
+    CONVICTIONS,
+    MORTAL_ORIGINS,
+    VENTRUE_FEEDING_PREFERENCES,
+    choose_sire_from_creation,
+    concept_from_origin,
+    conviction as conviction_rule,
+)
 from .era import era_for_year
 from .models import GameState
 from .sire_relations import sire_bond
 from .situations import generate_situations, resolve_situation
-from .vampire_profile import default_profile
+from .vampire_profile import profile_for_creation
 from .vampire_profile_store import VampireProfileStore
 
 
-MORTAL_STANCE_LABELS = {
-    "humanist": "Humaniste",
-    "predatory": "Prédateur",
-}
-ORDER_STANCE_LABELS = {
-    "orthodox": "Attaché aux anciens usages",
-    "reformist": "Réformateur",
-}
 ROAD_LABELS = {
     "humanitatis": "Via Humanitatis",
     "regalis": "Via Regalis",
@@ -47,6 +46,13 @@ ROAD_LABELS = {
     "bestiae": "Via Bestiae",
     "peccati": "Via Peccati",
     "via_mutationis": "Voie de la transformation",
+}
+SKILL_LABELS = {
+    "etiquette": "Étiquette",
+    "insight": "Intuition",
+    "persuasion": "Persuasion",
+    "politics": "Politique",
+    "survival": "Survie",
 }
 CAMARILLA_STAGE_LABELS = {
     "absent": "Aucune Camarilla constituée",
@@ -82,75 +88,93 @@ def _render_creation(
         "d'autrui et la Camarilla qui vient d'être annoncée reste une coalition contestée, loin de son ordre futur."
     )
 
-    with st.form("create_player_character"):
-        st.subheader("Créer votre vampire")
-        player_name = st.text_input("Nom du joueur", value=default_player_name or "Joueur")
-        name = st.text_input("Nom du vampire")
-        clan_id = st.selectbox(
-            "Clan",
-            options=SUPPORTED_CLANS,
-            format_func=lambda value: CLAN_LABELS[value],
-        )
-        concept = st.text_input(
-            "Concept mortel / social",
-            placeholder="Ex. chevalier déchu, copiste monastique, héritière marchande…",
-        )
-        mortal_stance = st.selectbox(
-            "Rapport aux mortels",
-            options=("humanist", "predatory"),
-            format_func=lambda value: MORTAL_STANCE_LABELS[value],
-        )
-        order_stance = st.selectbox(
-            "Rapport à l'ordre caïnite",
-            options=("orthodox", "reformist"),
-            format_func=lambda value: ORDER_STANCE_LABELS[value],
-        )
-        starting_discipline = st.selectbox(
-            "Discipline de départ dominante",
-            options=CLAN_DISCIPLINES[clan_id],
-        )
-        conviction = st.text_input(
-            "Conviction",
-            placeholder="Ex. Je ne sacrifierai pas un innocent pour ma propre sécurité.",
-        )
-        touchstone = st.text_input(
-            "Pierre de touche mortelle",
-            placeholder="Ex. ma sœur restée humaine, mon ancien apprenti, un village protégé…",
-        )
-        road_affinity = st.selectbox(
-            "Affinité de Voie",
-            options=("humanitatis", "regalis", "caeli", "bestiae", "peccati"),
-            format_func=lambda value: ROAD_LABELS[value],
-        )
-        feeding_preference = st.text_input(
-            "Préférence de chasse",
-            placeholder="Particulièrement importante pour un Ventrue ; sinon facultative.",
-        )
-        current_desire = st.text_input(
-            "Désir immédiat",
-            placeholder="Ex. obtenir une nuit sans ordre de mon sire.",
-        )
-        long_term_goal = st.text_input(
-            "Ambition à long terme",
-            placeholder="Ex. obtenir un Domaine, devenir indispensable à la Cour…",
-        )
-        chapter_goal = st.text_input(
-            "Objectif du premier chapitre",
-            placeholder="Ex. obtenir une autonomie de chasse, comprendre mon sire…",
-        )
-        submitted = st.form_submit_button(
-            "Commencer la chronique",
-            type="primary",
-            use_container_width=True,
-        )
+    st.subheader("Créer votre vampire")
+    player_name = st.text_input("Nom du joueur", value=default_player_name or "Joueur")
+    name = st.text_input("Nom du vampire")
+    clan_id = st.selectbox(
+        "Clan",
+        options=SUPPORTED_CLANS,
+        format_func=lambda value: CLAN_LABELS[value],
+    )
 
+    origin_ids = tuple(item.id for item in MORTAL_ORIGINS)
+    origin_id = st.selectbox(
+        "Origine mortelle",
+        options=origin_ids,
+        format_func=lambda value: next(item.label for item in MORTAL_ORIGINS if item.id == value),
+    )
+    selected_origin = next(item for item in MORTAL_ORIGINS if item.id == origin_id)
+    st.caption(selected_origin.description)
+    origin_detail = st.text_input(
+        "Précision sur votre ancienne vie — facultatif",
+        placeholder="Ex. chevalier sans terre, copiste d'un monastère, héritière d'un comptoir…",
+    )
+
+    starting_discipline = st.selectbox(
+        "Discipline de départ dominante",
+        options=CLAN_DISCIPLINES[clan_id],
+        key=f"chronicle_starting_discipline_{clan_id}",
+    )
+
+    conviction_ids = tuple(item.id for item in CONVICTIONS)
+    conviction_id = st.selectbox(
+        "Conviction",
+        options=conviction_ids,
+        format_func=lambda value: next(item.label for item in CONVICTIONS if item.id == value),
+    )
+    selected_conviction = conviction_rule(conviction_id)
+    st.caption(selected_conviction.description)
+    st.caption(
+        f"Effet mécanique actuel : +1 en {SKILL_LABELS.get(selected_conviction.favored_skill, selected_conviction.favored_skill)}. "
+        "Les conséquences morales de respecter ou violer cette Conviction seront reliées à l'Humanité lors de la passe dédiée."
+    )
+
+    st.info("Voie des personnages joueurs : Via Humanitatis.")
+
+    feeding_preference = None
+    if clan_id == "ventrue":
+        feeding_preference = st.selectbox(
+            "Restriction de chasse Ventrue",
+            options=VENTRUE_FEEDING_PREFERENCES,
+            key="chronicle_ventrue_feeding_preference",
+        )
+        st.caption("Votre Sang n'accepte réellement que des proies correspondant à cette catégorie.")
+
+    sire_key = "|".join(
+        (
+            player_id,
+            name.strip().lower(),
+            clan_id,
+            origin_id,
+            conviction_id,
+            starting_discipline,
+            feeding_preference or "",
+        )
+    )
+    selected_sire = choose_sire_from_creation(
+        clan_id=clan_id,
+        origin_id=origin_id,
+        conviction_id=conviction_id,
+        starting_discipline=starting_discipline,
+        stable_key=sire_key,
+    )
+    with st.container(border=True):
+        st.markdown(f"### Sire déterminé — {selected_sire.name}")
+        st.caption(selected_sire.title)
+        st.write(selected_sire.description)
+        st.write(f"**Protection initiale :** {selected_sire.protection}")
+        st.write(f"**Ce qu'il attend :** {selected_sire.expectation}")
+        st.caption("Ce sire est calculé automatiquement à partir du Clan, de l'origine, de la Conviction et de la Discipline choisis.")
+
+    submitted = st.button(
+        "Commencer la chronique",
+        type="primary",
+        use_container_width=True,
+    )
     if not submitted:
         return
     if not name.strip():
         st.error("Votre vampire doit avoir un nom.")
-        return
-    if not conviction.strip() or not touchstone.strip():
-        st.error("Une Conviction et une Pierre de touche sont nécessaires pour commencer.")
         return
 
     progress = store.get_progress(CHRONICLE_GAME_ID)
@@ -165,24 +189,24 @@ def _render_creation(
         character_id=f"pc_{uuid.uuid4().hex}",
         name=name,
         clan_id=clan_id,
-        concept=concept,
+        concept=concept_from_origin(origin_id, origin_detail),
         starting_discipline=starting_discipline,
-        mortal_stance=mortal_stance,
-        order_stance=order_stance,
-        long_term_goal=long_term_goal,
-        chapter_goal=chapter_goal,
+        # Retained internally only for compatibility with V0.21-V0.39 saves.
+        # They are no longer player-facing creation choices.
+        mortal_stance="humanist",
+        order_stance="orthodox",
+        long_term_goal="",
+        chapter_goal="",
         progress=progress,
+        sire_id=selected_sire.id,
+        sire_name=selected_sire.name,
     )
     store.create_character(character)
 
-    profile = default_profile(character)
-    profile = replace(
-        profile,
-        convictions=(conviction.strip(),),
-        touchstones=(touchstone.strip(),),
-        road_affinity=road_affinity,
-        current_desire=(current_desire.strip() or profile.current_desire),
-        feeding_preference=(feeding_preference.strip() or profile.feeding_preference),
+    profile = profile_for_creation(
+        character,
+        conviction_id=conviction_id,
+        feeding_preference=feeding_preference,
     )
     profile_store.save(profile)
 
@@ -386,12 +410,19 @@ def _render_profile(character, profile) -> None:
     st.write(f"**Fléau — {identity.bane_name} :** {identity.bane_text}")
     st.write(f"**Génération :** {profile.generation}e")
     st.write(f"**Puissance du Sang :** {profile.blood_potency}")
-    st.write(f"**Affinité de Voie :** {ROAD_LABELS.get(profile.road_affinity, profile.road_affinity)}")
-    st.write(f"**Conviction :** {profile.convictions[0]}")
-    st.write(f"**Pierre de touche :** {profile.touchstones[0]}")
-    st.write(f"**Désir actuel :** {profile.current_desire}")
+    st.write(f"**Voie :** {ROAD_LABELS.get(profile.road_affinity, profile.road_affinity)}")
+    conviction_value = profile.convictions[0] if profile.convictions else ""
+    try:
+        selected_conviction = conviction_rule(conviction_value)
+    except ValueError:
+        st.write(f"**Conviction :** {conviction_value or 'Non renseignée'}")
+    else:
+        st.write(f"**Conviction :** {selected_conviction.label}")
+        st.caption(
+            f"Effet actuel : +1 en {SKILL_LABELS.get(selected_conviction.favored_skill, selected_conviction.favored_skill)}."
+        )
     if profile.feeding_preference:
-        st.write(f"**Préférence de chasse :** {profile.feeding_preference}")
+        st.write(f"**Restriction de chasse :** {profile.feeding_preference}")
 
 
 def _render_domain_and_debts(character, simulation, year: int) -> None:
@@ -477,10 +508,9 @@ def _render_night(
     progress,
 ) -> None:
     st.subheader(f"Nuit {character.local_night}")
-    st.write(f"**Objectif du chapitre :** {character.chapter_goal}")
     st.caption(
-        f"Progression actuelle : {character.goal_progress}. Les propositions ci-dessous sont des situations, "
-        "pas une liste d'actions abstraites : choisissez celle que votre vampire décide réellement d'affronter."
+        "Les propositions ci-dessous sont des situations, pas une liste d'actions abstraites : "
+        "choisissez celle que votre vampire décide réellement d'affronter."
     )
 
     situations = generate_situations(character, profile, simulation, year=progress.year)
@@ -612,7 +642,6 @@ def render_chronicle_app(
         _render_sire(character, profile, era_for_year(progress.year))
         _render_profile(character, profile)
         st.markdown("### Votre position")
-        st.write(f"**Ambition :** {character.long_term_goal}")
         st.write(f"**Réputation :** {character.reputation:+d}")
         st.write(f"**Expérience accumulée :** {character.experience}")
 

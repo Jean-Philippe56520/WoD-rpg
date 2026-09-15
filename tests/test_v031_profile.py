@@ -34,7 +34,8 @@ def test_default_profile_adds_vampire_sheet_without_mutating_core_character():
     assert set(profile.attributes) == set(ATTRIBUTE_NAMES)
     assert set(profile.skills) == set(SKILL_NAMES)
     assert profile.convictions
-    assert profile.touchstones
+    assert profile.touchstones == ()
+    assert profile.road_affinity == "humanitatis"
     assert profile.feeding_preference is not None
     assert character.status == 0
 
@@ -53,5 +54,6 @@ def test_profile_store_roundtrip_is_backward_compatible(tmp_path):
 
     assert loaded == created
     assert loaded is not None
-    assert loaded.road_affinity
+    assert loaded.road_affinity == "humanitatis"
+    assert loaded.touchstones == ()
     assert loaded.disciplines

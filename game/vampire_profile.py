@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Mapping
 
 from .chronicle import PlayerCharacter
+from .creation_rules import apply_conviction_skill_bonus, conviction
 
 
 ATTRIBUTE_NAMES = (
@@ -55,12 +56,14 @@ class VampireProfile:
     disciplines: dict[str, int] = field(default_factory=dict)
     backgrounds: dict[str, int] = field(default_factory=dict)
     convictions: tuple[str, ...] = ()
+    # Kept only for backward compatibility with V0.31-V0.39 JSON saves.
+    # New characters do not create or use Touchstones.
     touchstones: tuple[str, ...] = ()
     road_affinity: str = "humanitatis"
-    current_desire: str = "Trouver ma place sans devenir l'instrument d'un ancien"
+    current_desire: str = ""
     feeding_preference: str | None = None
     released_from_sire: bool = False
-    schema_version: int = 1
+    schema_version: int = 2
 
     def __post_init__(self) -> None:
         if not 4 <= self.generation <= 16:
@@ -79,8 +82,6 @@ class VampireProfile:
                 raise ValueError("Background scores must be between 0 and 5")
         if not self.convictions:
             raise ValueError("At least one Conviction is required")
-        if not self.touchstones:
-            raise ValueError("At least one Touchstone is required")
 
     def pool(self, attribute: str, skill: str, *, bonus: int = 0) -> int:
         if attribute not in self.attributes:
@@ -130,21 +131,14 @@ def _base_skills(clan_id: str) -> dict[str, int]:
     return values
 
 
-def _default_conviction(character: PlayerCharacter) -> str:
-    if character.mortal_stance == "humanist":
-        return "Ne pas sacrifier un innocent pour faciliter ma propre survie"
-    return "Ne jamais gaspiller une vie ou une dette qui pourrait servir ma lignée"
-
-
-def _default_road(character: PlayerCharacter) -> str:
-    if character.mortal_stance == "humanist":
-        return "humanitatis"
-    if character.order_stance == "orthodox":
-        return "regalis"
-    return "bestiae"
-
-
 def default_profile(character: PlayerCharacter) -> VampireProfile:
+    """Create a backward-compatible profile for characters without one.
+
+    V0.40 makes Via Humanitatis the only player Road and removes Touchstones.
+    Existing characters keep their persisted JSON unchanged when it already
+    exists; this default is used only when a profile must be synthesized.
+    """
+
     sire_generation = SIRE_GENERATIONS.get(character.sire_id, 10)
     generation = min(16, sire_generation + 1)
     discipline_key = character.starting_discipline.strip().lower()
@@ -161,11 +155,38 @@ def default_profile(character: PlayerCharacter) -> VampireProfile:
         skills=_base_skills(character.clan_id),
         disciplines={discipline_key: 1},
         backgrounds={"sire": 1, "contacts": 1, "resources": 0, "status": 0},
-        convictions=(_default_conviction(character),),
-        touchstones=("Un mortel encore lié à votre ancienne existence",),
-        road_affinity=_default_road(character),
-        current_desire="Obtenir assez d'autonomie pour choisir moi-même ma prochaine nuit",
+        convictions=("keep_word",),
+        touchstones=(),
+        road_affinity="humanitatis",
+        current_desire="",
         feeding_preference=feeding,
+    )
+
+
+def profile_for_creation(
+    character: PlayerCharacter,
+    *,
+    conviction_id: str,
+    feeding_preference: str | None = None,
+) -> VampireProfile:
+    """Build the V0.40 sheet from structured creation choices.
+
+    A Conviction has an immediate mechanical effect: it increases its linked
+    Skill by one dot (maximum 5). This compact rule is intentionally simple;
+    the later Humanity pass can add uphold/violation consequences without
+    requiring free-text interpretation.
+    """
+
+    conviction(conviction_id)
+    profile = default_profile(character)
+    return replace(
+        profile,
+        skills=apply_conviction_skill_bonus(profile.skills, conviction_id),
+        convictions=(conviction_id,),
+        touchstones=(),
+        road_affinity="humanitatis",
+        current_desire="",
+        feeding_preference=feeding_preference if character.clan_id == "ventrue" else None,
     )
 
 
@@ -201,7 +222,7 @@ def profile_from_dict(data: Mapping) -> VampireProfile:
         skills={str(k): int(v) for k, v in dict(data["skills"]).items()},
         disciplines={str(k): int(v) for k, v in dict(data.get("disciplines", {})).items()},
         backgrounds={str(k): int(v) for k, v in dict(data.get("backgrounds", {})).items()},
-        convictions=tuple(str(item) for item in data.get("convictions", ())),
+        convictions=tuple(str(item) for item in data.get("convictions", ("keep_word",))),
         touchstones=tuple(str(item) for item in data.get("touchstones", ())),
         road_affinity=str(data.get("road_affinity", "humanitatis")),
         current_desire=str(data.get("current_desire", "")),
