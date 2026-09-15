@@ -55,10 +55,10 @@ def ideological_affinity_axes(
     humanity_b: AxisPolarity | str,
     tradition_b: AxisPolarity | str,
 ) -> float:
-    """Affinité simple : +100 même courant, 0 un axe commun, -100 axes opposés."""
+    """Affinité compacte : +100 même courant, +50 un axe commun, -100 opposés."""
     matches = int(AxisPolarity(humanity_a) == AxisPolarity(humanity_b))
     matches += int(AxisPolarity(tradition_a) == AxisPolarity(tradition_b))
-    return {-0: -100.0, 1: 0.0, 2: 100.0}[matches]
+    return {0: -100.0, 1: 50.0, 2: 100.0}[matches]
 
 
 def ideological_affinity_values(
