@@ -7,10 +7,19 @@ from typing import Iterable, Mapping
 from .actions import apply_action
 from .autonomy import resolve_autonomous_reactions
 from .config import DEFAULT_RULES, GameRules
+from .domains import (
+    grant_hunting_right,
+    initialize_domains,
+    open_domain_dispute,
+    resolve_domain_pressure,
+    revoke_hunting_right,
+)
 from .embrace import process_primogen_petition
 from .factions import determine_faction_stances, initialize_factions
 from .models import (
     Candidate,
+    DomainDecisionOrder,
+    DomainDecisionType,
     EmbracePetitionOrder,
     GameAction,
     GameEvent,
@@ -20,7 +29,13 @@ from .models import (
 )
 from .offices import install_prince
 from .politics import VoteResolution, resolve_praxis_vote
-from .social_politics import generate_requests_for_night, process_request_decision
+from .social_politics import (
+    add_grievance,
+    create_boon,
+    fulfill_promise,
+    generate_requests_for_night,
+    process_request_decision,
+)
 
 
 @dataclass(frozen=True)
@@ -63,6 +78,92 @@ def _validate_action_budget(
     return actions
 
 
+def _audience_for_characters(state: GameState, *character_ids: str) -> tuple[str, ...] | None:
+    clans = {
+        state.characters[character_id].clan_id
+        for character_id in character_ids
+        if character_id in state.characters and state.characters[character_id].clan_id
+    }
+    return tuple(sorted(clans)) or None
+
+
+def _apply_domain_decision(
+    state: GameState,
+    clan_id: str,
+    order: DomainDecisionOrder,
+) -> GameEvent:
+    primogen_id = state.clan_states[clan_id].clan.primogen_id
+    primogen = state.characters[primogen_id]
+    domain = state.domains[order.domain_id]
+
+    if order.decision == DomainDecisionType.GRANT_HUNTING_RIGHT:
+        if not order.beneficiary_id:
+            raise ValueError("Granting a hunting right requires a beneficiary")
+        boon_id = None
+        if order.boon_level:
+            boon = create_boon(
+                state,
+                creditor_id=primogen_id,
+                debtor_id=order.beneficiary_id,
+                level=order.boon_level,
+                origin=f"Droit de chasse accordé sur {domain.name}",
+            )
+            boon_id = boon.id
+        right = grant_hunting_right(
+            state,
+            domain_id=domain.id,
+            beneficiary_id=order.beneficiary_id,
+            granted_by_id=primogen_id,
+            duration_nights=order.duration_nights,
+            conditions="Concession directe du Primogène",
+            boon_id=boon_id,
+        )
+        beneficiary = state.characters[right.beneficiary_id]
+        counterpart = (
+            f" contre une faveur {order.boon_level.value}" if order.boon_level else ""
+        )
+        return GameEvent(
+            night=state.night,
+            category="domaine",
+            message=(
+                f"{primogen.name} accorde à {beneficiary.name} un droit de chasse sur "
+                f"{domain.name} pour {order.duration_nights} nuits{counterpart}."
+            ),
+            audience_clan_ids=_audience_for_characters(state, primogen_id, beneficiary.id),
+        )
+
+    if not order.right_id:
+        raise ValueError("Revoking a hunting right requires a right id")
+    right = state.hunting_rights[order.right_id]
+    beneficiary = state.characters[right.beneficiary_id]
+    revoke_hunting_right(state, order.right_id, primogen_id)
+    if beneficiary.id != primogen_id:
+        add_grievance(
+            state,
+            owner_id=beneficiary.id,
+            target_id=primogen_id,
+            reason=f"Révocation du droit de chasse sur {domain.name}",
+            severity=1,
+        )
+        open_domain_dispute(
+            state,
+            domain_id=domain.id,
+            claimant_id=beneficiary.id,
+            respondent_id=primogen_id,
+            reason=f"Révocation contestée d'un droit de chasse sur {domain.name}",
+            severity=1,
+        )
+    return GameEvent(
+        night=state.night,
+        category="domaine",
+        message=(
+            f"{primogen.name} révoque le droit de chasse de {beneficiary.name} sur {domain.name}. "
+            "La décision crée une tension territoriale."
+        ),
+        audience_clan_ids=_audience_for_characters(state, primogen_id, beneficiary.id),
+    )
+
+
 def resolve_night(
     state: GameState,
     actions: Iterable[GameAction],
@@ -70,10 +171,13 @@ def resolve_night(
     candidates: Iterable[Candidate],
     embrace_petitions: Iterable[tuple[str, EmbracePetitionOrder]] = (),
     request_decisions: Iterable[tuple[str, PoliticalRequestDecisionOrder]] = (),
+    domain_decisions: Iterable[tuple[str, DomainDecisionOrder]] = (),
+    promise_fulfillments: Iterable[tuple[str, str]] = (),
     rules: GameRules = DEFAULT_RULES,
 ) -> NightResolution:
     next_state = deepcopy(state)
     initialize_factions(next_state)
+    initialize_domains(next_state)
     actions = _validate_action_budget(next_state, actions, rules)
     candidates = list(candidates)
     candidate_map = {candidate.id: candidate for candidate in candidates}
@@ -83,6 +187,23 @@ def resolve_night(
         next_state.events.append(
             process_request_decision(next_state, clan_id, order.request_id, order.decision)
         )
+
+    for clan_id, promise_id in promise_fulfillments:
+        promise = next_state.promises[promise_id]
+        fulfill_promise(next_state, promise_id)
+        beneficiary = next_state.characters[promise.beneficiary_id]
+        primogen = next_state.characters[promise.promisor_id]
+        next_state.events.append(
+            GameEvent(
+                night=next_state.night,
+                category="promesse",
+                message=f"{primogen.name} honore sa promesse envers {beneficiary.name}.",
+                audience_clan_ids=(clan_id,),
+            )
+        )
+
+    for clan_id, order in domain_decisions:
+        next_state.events.append(_apply_domain_decision(next_state, clan_id, order))
 
     for action in actions:
         next_state.events.append(apply_action(next_state, action, rules))
@@ -163,6 +284,7 @@ def resolve_night(
 
     # Réactions post-résolution : dettes appelées, griefs, promesses et opportunités de faction.
     next_state.events.extend(resolve_autonomous_reactions(next_state))
+    next_state.events.extend(resolve_domain_pressure(next_state))
     initialize_factions(next_state)
 
     next_state.night += 1
