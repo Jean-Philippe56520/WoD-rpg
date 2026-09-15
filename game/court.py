@@ -40,8 +40,16 @@ def prince_policy_summary(state: GameState) -> str | None:
     if not state.prince_id or state.prince_id not in state.characters:
         return None
     prince = state.characters[state.prince_id]
-    humanity = "protection de la Mascarade et des mortels" if prince.mortal_stance == MortalStance.HUMANIST else "efficacité prédatrice"
-    order = "ordre et précédents" if prince.order_stance == OrderStance.ORTHODOX else "pragmatisme et réforme"
+    humanity = (
+        "protection de la Mascarade et des mortels"
+        if prince.mortal_stance == MortalStance.HUMANIST
+        else "efficacité prédatrice"
+    )
+    order = (
+        "ordre et précédents"
+        if prince.order_stance == OrderStance.ORTHODOX
+        else "pragmatisme et réforme"
+    )
     ambition = {
         PoliticalAmbition.ENFORCE_ORDER: "consolider l'autorité de la Cour",
         PoliticalAmbition.RAPPROCHEMENT: "préserver les compromis entre clans",
@@ -123,8 +131,6 @@ def _party_score(state: GameState, character_id: str, domain_holder_id: str | No
     score += ideology_relation_modifier(prince, character) * 2
     if character.id == domain_holder_id:
         score += 4 if prince.order_stance == OrderStance.ORTHODOX else 1
-    # Une faveur appelée au Prince est un levier politique réel, sans garantir
-    # mécaniquement le résultat.
     score += 3 * sum(
         1
         for boon in state.boons.values()
@@ -154,37 +160,65 @@ def _resolve_domain_arbitration(
             ),
         )
 
-    claimant_score = _party_score(state, dispute.claimant_id, domain.holder_id)
-    respondent_score = _party_score(state, dispute.respondent_id, domain.holder_id)
-    if claimant_score == respondent_score:
-        winner_id = domain.holder_id if domain.holder_id in {dispute.claimant_id, dispute.respondent_id} else dispute.claimant_id
+    participants = {dispute.claimant_id, dispute.respondent_id}
+    prince_is_party = prince.id in participants
+    if prince_is_party:
+        # Un litige né d'un décret princier n'est pas un procès où le Prince se
+        # condamne lui-même : il confirme son autorité, au prix d'un grief durable.
+        winner_id = prince.id
+        loser_id = next(character_id for character_id in participants if character_id != prince.id)
     else:
-        winner_id = dispute.claimant_id if claimant_score > respondent_score else dispute.respondent_id
-    loser_id = dispute.respondent_id if winner_id == dispute.claimant_id else dispute.claimant_id
+        claimant_score = _party_score(state, dispute.claimant_id, domain.holder_id)
+        respondent_score = _party_score(state, dispute.respondent_id, domain.holder_id)
+        if claimant_score == respondent_score:
+            winner_id = (
+                domain.holder_id
+                if domain.holder_id in participants
+                else dispute.claimant_id
+            )
+        else:
+            winner_id = (
+                dispute.claimant_id
+                if claimant_score > respondent_score
+                else dispute.respondent_id
+            )
+        loser_id = (
+            dispute.respondent_id
+            if winner_id == dispute.claimant_id
+            else dispute.claimant_id
+        )
 
     state.prince_political_capital -= rules.prince_domain_arbitration_cost
     resolve_domain_dispute(state, dispute.id)
     winner = state.characters[winner_id]
     loser = state.characters[loser_id]
-    if winner.clan_id:
-        state.prince_relations[winner.clan_id] = state.prince_relations.get(winner.clan_id, 0.0) + 1
-    if loser.clan_id:
-        state.prince_relations[loser.clan_id] = state.prince_relations.get(loser.clan_id, 0.0) - 2
-    add_grievance(
-        state,
-        owner_id=loser.id,
-        target_id=prince.id,
-        reason=f"Arbitrage princier défavorable sur {domain.name}",
-        severity=max(1, dispute.severity - 1),
-    )
-    return GameEvent(
-        night=state.night,
-        category="cour",
-        message=(
+    if winner.id != prince.id and winner.clan_id:
+        state.prince_relations[winner.clan_id] = (
+            state.prince_relations.get(winner.clan_id, 0.0) + 1
+        )
+    if loser.id != prince.id and loser.clan_id:
+        state.prince_relations[loser.clan_id] = (
+            state.prince_relations.get(loser.clan_id, 0.0) - 2
+        )
+        add_grievance(
+            state,
+            owner_id=loser.id,
+            target_id=prince.id,
+            reason=f"Arbitrage princier défavorable sur {domain.name}",
+            severity=max(1, dispute.severity - 1),
+        )
+
+    if prince_is_party:
+        message = (
+            f"{prince.name} confirme son autorité dans le litige de {domain.name}. "
+            f"{loser.name} subit le décret et nourrit un grief contre le Prince."
+        )
+    else:
+        message = (
             f"{prince.name} tranche le litige de {domain.name} en faveur de {winner.name}. "
             f"{loser.name} encaisse publiquement la décision et nourrit un grief contre le Prince."
-        ),
-    )
+        )
+    return GameEvent(night=state.night, category="cour", message=message)
 
 
 def _resolve_masquerade_crisis(
@@ -244,8 +278,13 @@ def _resolve_stability_crisis(
             ),
         )
     state.prince_political_capital -= rules.prince_stability_response_cost
-    state.prince_relations[weakest_clan] = state.prince_relations.get(weakest_clan, 0.0) + 2
-    state.camarilla_stability = min(100.0, state.camarilla_stability + rules.prince_stability_response_gain)
+    state.prince_relations[weakest_clan] = (
+        state.prince_relations.get(weakest_clan, 0.0) + 2
+    )
+    state.camarilla_stability = min(
+        100.0,
+        state.camarilla_stability + rules.prince_stability_response_gain,
+    )
     return GameEvent(
         night=state.night,
         category="cour",
@@ -308,4 +347,7 @@ def prince_should_approve_embrace(
     political_cost: float,
     rules: GameRules = DEFAULT_RULES,
 ) -> bool:
-    return embrace_approval_score(state, requester_id, political_cost, rules) >= rules.prince_embrace_approval_threshold
+    return (
+        embrace_approval_score(state, requester_id, political_cost, rules)
+        >= rules.prince_embrace_approval_threshold
+    )
