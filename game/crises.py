@@ -180,7 +180,9 @@ def crisis_clues(crisis: Crisis, intel_level: int) -> list[str]:
         if crisis.faction == HUNTERS:
             clues.append("Les enquêteurs cherchent un témoin ou une trace administrative exploitable.")
         else:
-            clues.append("La cellule cherche surtout accès, autonomie et droits de chasse plutôt qu'un affrontement immédiat.")
+            clues.append(
+                "La cellule cherche surtout accès, autonomie et droits de chasse plutôt qu'un affrontement immédiat."
+            )
     return clues
 
 
@@ -224,8 +226,15 @@ def _expertise_bonus(character, names: tuple[str, ...]) -> int:
     return 1 if any(has_expertise(character, name) for name in names) else 0
 
 
-def _score_for_response(state: GameState, crisis: Crisis, action: GameAction) -> tuple[int, int]:
-    actor = state.characters[action.actor_character_id or state.clan_states[action.clan_id].clan.primogen_id]
+def _score_for_response(
+    state: GameState,
+    crisis: Crisis,
+    action: GameAction,
+    rules: GameRules,
+) -> tuple[int, int]:
+    actor = state.characters[
+        action.actor_character_id or state.clan_states[action.clan_id].clan.primogen_id
+    ]
     intel = current_crisis_intel(state, crisis.id, action.clan_id)
 
     if action.action_type == ActionType.CRISIS_INVESTIGATE:
@@ -278,8 +287,8 @@ def _score_for_response(state: GameState, crisis: Crisis, action: GameAction) ->
     else:
         raise ValueError("Not a crisis-response action")
 
-    difficulty = rules_difficulty = 3 + crisis.stage - 1 + modifier
-    return score + intel, max(2, rules_difficulty)
+    difficulty = max(2, rules.crisis_base_difficulty + crisis.stage - 1 + modifier)
+    return score + intel, difficulty
 
 
 def _response_category(
@@ -378,7 +387,7 @@ def crisis_response_event(
     actor_id = action.actor_character_id or state.clan_states[action.clan_id].clan.primogen_id
     actor = state.characters[actor_id]
     domain = state.domains[crisis.domain_id]
-    score, difficulty = _score_for_response(state, crisis, action)
+    score, difficulty = _score_for_response(state, crisis, action, rules)
 
     if score >= difficulty + 2:
         outcome = "strong"
@@ -485,7 +494,11 @@ def _intel_event(state: GameState, crisis: Crisis, clan_id: str, gain: int) -> G
 
 
 def _required_progress(crisis: Crisis, rules: GameRules) -> int:
-    return rules.crisis_stage1_required_progress if crisis.stage == 1 else rules.crisis_late_stage_required_progress
+    return (
+        rules.crisis_stage1_required_progress
+        if crisis.stage == 1
+        else rules.crisis_late_stage_required_progress
+    )
 
 
 def _transition_event(
