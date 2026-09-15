@@ -13,24 +13,24 @@ DIFFICULTY_BANDS: tuple[tuple[int, int | None, str, str], ...] = (
 
 
 def difficulty_band(difficulty: int) -> str:
-    """Return the player-facing difficulty band without exposing the target number."""
+    """Retourne le palier de difficulté visible sans révéler le seuil exact."""
 
     if difficulty < 1:
-        raise ValueError("Difficulty must be positive")
+        raise ValueError("La difficulté doit être positive")
     for minimum, maximum, label, _ in DIFFICULTY_BANDS:
         if difficulty >= minimum and (maximum is None or difficulty <= maximum):
             return label
-    raise AssertionError("Unreachable difficulty band")
+    raise AssertionError("Palier de difficulté introuvable")
 
 
 def difficulty_hint(difficulty: int) -> str:
-    """Return a diegetic risk clue while keeping the exact difficulty hidden."""
+    """Retourne un indice narratif tout en conservant le seuil exact caché."""
 
     band = difficulty_band(difficulty)
     for _, _, label, hint in DIFFICULTY_BANDS:
         if label == band:
             return hint
-    raise AssertionError("Unreachable difficulty hint")
+    raise AssertionError("Indice de difficulté introuvable")
 
 
 @dataclass(frozen=True)
@@ -116,7 +116,7 @@ def roll_pool(*, pool: int, hunger: int, difficulty: int, seed: str) -> DiceResu
     if pool < 1:
         pool = 1
     if difficulty < 1:
-        raise ValueError("Difficulty must be positive")
+        raise ValueError("La difficulté doit être positive")
     hunger = max(0, min(5, hunger))
     hunger_count = min(pool, hunger)
     normal_count = pool - hunger_count
@@ -140,11 +140,11 @@ def roll_pool(*, pool: int, hunger: int, difficulty: int, seed: str) -> DiceResu
 
 
 def rouse_check(*, hunger: int, seed: str) -> tuple[int, int]:
-    """Return the rouse die and resulting Hunger.
+    """Résout un Test d'Exaltation déterministe et retourne la nouvelle Faim.
 
-    A result of 6+ succeeds and leaves Hunger unchanged. A failure increases
-    Hunger by one, capped at 5. This deterministic implementation preserves
-    asynchronous retry safety while using the V5-style risk structure.
+    Un résultat de 6+ laisse la Faim inchangée. Un échec augmente la Faim de 1,
+    avec un maximum de 5. Le déterminisme protège les nouvelles tentatives du
+    moteur asynchrone contre les doubles résolutions divergentes.
     """
 
     die = _die(seed + ":rouse", 0)
