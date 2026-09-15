@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 
+from .consequences import consequence_graduee
+
 
 BONUS_COUP_DE_SANG = {
     0: 1,
@@ -15,15 +17,6 @@ BONUS_COUP_DE_SANG = {
     8: 5,
     9: 6,
     10: 6,
-}
-
-ATTRIBUTS_MENTAUX_SOCIAUX = {
-    "charisma",
-    "manipulation",
-    "composure",
-    "intelligence",
-    "wits",
-    "resolve",
 }
 
 
@@ -42,13 +35,9 @@ def bonus_coup_de_sang(puissance_du_sang: int) -> int:
 
 
 def perte_volonte_apres_echec(choice, dice) -> int:
-    """Un revers mental ou social marqué inflige 1 point d'usure de Volonté."""
+    """Délègue l'usure de Volonté à la couche de conséquences graduées."""
 
-    if dice.success:
-        return 0
-    if choice.attribute not in ATTRIBUTS_MENTAUX_SOCIAUX:
-        return 0
-    return 1 if dice.margin <= -2 else 0
+    return consequence_graduee(choice, dice).usure_volonte
 
 
 def recuperer_volonte_fin_nuit(profile) -> tuple[object, int]:

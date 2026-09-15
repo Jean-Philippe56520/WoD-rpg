@@ -198,7 +198,7 @@ def test_depense_de_volonte_est_persistante_si_une_relance_a_lieu():
     raise AssertionError("Aucune graine de résolution n'a produit de relance de Volonté")
 
 
-def test_echec_mental_social_net_use_la_volonte_mais_pas_echec_physique():
+def test_echec_mental_social_grave_use_la_volonte_mais_pas_echec_physique():
     echec = DiceResult(
         pool=4,
         difficulty=4,
@@ -214,7 +214,7 @@ def test_echec_mental_social_net_use_la_volonte_mais_pas_echec_physique():
     social = situation_sociale(difficulty=4).choices[0]
     physique = replace(social, attribute="strength", skill="brawl")
 
-    assert perte_volonte_apres_echec(social, echec) == 1
+    assert perte_volonte_apres_echec(social, echec) == 2
     assert perte_volonte_apres_echec(physique, echec) == 0
 
 
