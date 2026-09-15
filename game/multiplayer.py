@@ -60,16 +60,22 @@ class MultiplayerGameService:
                     raise ValueError("A player cannot submit actions for another clan")
 
         if orders.version >= 3:
-            open_request_ids = {
+            actionable_request_ids = {
                 request.id
                 for request in state.political_requests.values()
-                if request.clan_id == clan_id and request.status == PoliticalRequestStatus.OPEN
+                if request.clan_id == clan_id
+                and request.status in {
+                    PoliticalRequestStatus.OPEN,
+                    PoliticalRequestStatus.PROMISED,
+                }
             }
             decision_ids = [item.request_id for item in orders.request_decisions]
             if len(decision_ids) != len(set(decision_ids)):
                 raise ValueError("A political request may receive only one decision")
-            if set(decision_ids) != open_request_ids:
-                raise ValueError("Every open political request must receive a Primogen decision")
+            if set(decision_ids) != actionable_request_ids:
+                raise ValueError(
+                    "Every open or promised political request must receive a Primogen decision"
+                )
         elif orders.request_decisions:
             raise ValueError("Political request decisions require V0.9 orders")
 
