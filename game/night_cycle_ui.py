@@ -7,7 +7,11 @@ from .chronicle_politics import primary_office
 from .chronicle_service import ChronicleService, chronicle_time_label, ellipse_label
 from .chronicle_world_store import ChronicleWorldStore
 from .dice import difficulty_band
-from .mecaniques_vampiriques import bonus_coup_de_sang, usage_discipline
+from .mecaniques_vampiriques import (
+    bonus_coup_de_sang,
+    recuperer_volonte_fin_nuit,
+    usage_discipline,
+)
 from .night_cycle import (
     NightPhase,
     OptionsResolution,
@@ -90,24 +94,24 @@ def _render_choice_form(
     key_prefix: str,
     submit_label: str,
 ):
-    with st.form(f"{key_prefix}_{situation.id}"):
-        choice_id = st.radio(
-            "Votre décision",
-            options=[choice.id for choice in situation.choices],
-            format_func=lambda value: next(
-                choice.label for choice in situation.choices if choice.id == value
-            ),
-            key=f"{key_prefix}_choice_{situation.id}",
-        )
-        selected = next(choice for choice in situation.choices if choice.id == choice_id)
-        preview = action_risk_preview(character, simulation, situation, selected)
-        st.caption(selected.description)
-        st.caption(
-            f"Approche : {_label(ATTRIBUTE_LABELS, preview.attribute)} + "
-            f"{_label(SKILL_LABELS, preview.skill)} · Risque estimé : **{preview.band.title()}**"
-        )
-        st.caption(preview.hint)
+    choice_id = st.radio(
+        "Votre décision",
+        options=[choice.id for choice in situation.choices],
+        format_func=lambda value: next(
+            choice.label for choice in situation.choices if choice.id == value
+        ),
+        key=f"{key_prefix}_choice_{situation.id}",
+    )
+    selected = next(choice for choice in situation.choices if choice.id == choice_id)
+    preview = action_risk_preview(character, simulation, situation, selected)
+    st.caption(selected.description)
+    st.caption(
+        f"Approche : {_label(ATTRIBUTE_LABELS, preview.attribute)} + "
+        f"{_label(SKILL_LABELS, preview.skill)} · Risque estimé : **{preview.band.title()}**"
+    )
+    st.caption(preview.hint)
 
+    with st.form(f"{key_prefix}_{situation.id}_{choice_id}"):
         st.markdown("**Leviers vampiriques**")
         usage = usage_discipline(profile, situation, selected)
         if usage is not None:
@@ -118,7 +122,9 @@ def _render_choice_form(
             st.caption(usage.description)
         else:
             utiliser_discipline = False
-            st.caption("Aucun pouvoir de Discipline actuellement modélisé ne s'applique directement à cette approche.")
+            st.caption(
+                "Aucun pouvoir de Discipline actuellement modélisé ne s'applique directement à cette approche."
+            )
 
         bonus_sang = bonus_coup_de_sang(profile.blood_potency)
         coup_indisponible = character.hunger >= 5
@@ -147,13 +153,14 @@ def _render_choice_form(
             "Précision libre",
             placeholder="Votre manière d'agir, ce que vous cachez, ce que vous cherchez vraiment…",
             max_chars=500,
-            key=f"{key_prefix}_intent_{situation.id}",
+            key=f"{key_prefix}_intent_{situation.id}_{choice_id}",
         )
         submitted = st.form_submit_button(
             submit_label,
             type="primary",
             use_container_width=True,
         )
+
     return (
         submitted,
         choice_id,
@@ -449,9 +456,15 @@ def render_night_cycle(
             night_state,
             nights_per_segment=progress.nights_per_segment,
         )
-        st.session_state["wod_last_chronicle_notice"] = (
+        profil_recupere, recuperation = recuperer_volonte_fin_nuit(profile)
+        if recuperation > 0:
+            profile_store.save(profil_recupere)
+        notice = (
             f"La nuit {character.local_night} s'achève. Ses conséquences sont désormais inscrites dans la Chronique."
         )
+        if recuperation > 0:
+            notice += f" Vous récupérez {recuperation} point(s) de Volonté."
+        st.session_state["wod_last_chronicle_notice"] = notice
         st.rerun()
 
 
