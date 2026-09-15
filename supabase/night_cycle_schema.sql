@@ -1,4 +1,4 @@
--- WoD-rpg V0.45 - persistent state inside a played night.
+-- WoD-rpg V0.45+ - persistent state inside a played night and Chronicle time.
 -- Apply after supabase/chronicle_schema.sql.
 
 create table if not exists public.wod_character_night_state (
@@ -206,4 +206,181 @@ revoke all on function public.wod_apply_night_cycle_step(text,text,integer,integ
 grant execute on function public.wod_ensure_night_cycle_state(text,text,text,integer,integer,integer,text,integer)
   to service_role;
 grant execute on function public.wod_apply_night_cycle_step(text,text,integer,integer,integer,text,integer,text,text,integer,integer,jsonb,integer,integer,double precision,integer,integer)
+  to service_role;
+
+-- V0.46 - coarse calendar and narrative chapter closure.
+-- Legacy segment/ellipse columns stay in place for backwards-compatible saves,
+-- but production progression now goes through this temporal RPC.
+create table if not exists public.wod_chronicle_time (
+  game_id text primary key references public.wod_games(id) on delete cascade,
+  month integer not null default 1 check (month between 1 and 12),
+  minimum_cycles_per_chapter integer not null default 2
+    check (minimum_cycles_per_chapter between 1 and 20),
+  cycle_months integer not null default 1 check (cycle_months between 1 and 12),
+  updated_at timestamptz not null default now()
+);
+
+alter table public.wod_chronicle_time enable row level security;
+revoke all on table public.wod_chronicle_time from public, anon, authenticated;
+grant select, insert, update, delete on table public.wod_chronicle_time to service_role;
+
+create or replace function public.wod_resolve_temporal_convergence(
+  p_game_id text,
+  p_close_chapter boolean default false
+)
+returns jsonb
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+declare
+  v_progress public.wod_chronicle_progress%rowtype;
+  v_time public.wod_chronicle_time%rowtype;
+  v_total integer;
+  v_not_ready integer;
+  v_goal_ready integer;
+  v_goal_strong integer;
+  v_oldest_age integer;
+  v_highest_status integer;
+  v_old_chapter integer;
+  v_old_segment integer;
+  v_ellipse_months integer := 0;
+  v_absolute_month integer;
+  v_next_year integer;
+  v_next_month integer;
+  v_next_chapter integer;
+  v_next_segment integer;
+begin
+  select * into v_progress
+  from public.wod_chronicle_progress
+  where game_id = p_game_id
+  for update;
+
+  if not found then
+    raise exception 'chronicle progress missing';
+  end if;
+
+  insert into public.wod_chronicle_time(game_id)
+  values(p_game_id)
+  on conflict(game_id) do nothing;
+
+  select * into v_time
+  from public.wod_chronicle_time
+  where game_id = p_game_id
+  for update;
+
+  v_old_chapter := v_progress.chapter;
+  v_old_segment := v_progress.segment;
+
+  select
+    count(*),
+    count(*) filter (where not ready_for_convergence),
+    count(*) filter (where goal_progress >= 2),
+    count(*) filter (where goal_progress >= 5),
+    coalesce(max(greatest(0, v_progress.year - embraced_year)), 0),
+    coalesce(max(status), 0)
+  into
+    v_total,
+    v_not_ready,
+    v_goal_ready,
+    v_goal_strong,
+    v_oldest_age,
+    v_highest_status
+  from public.wod_player_characters
+  where game_id = p_game_id
+    and is_active
+    and chapter = v_progress.chapter
+    and segment = v_progress.segment;
+
+  if v_total = 0 or v_not_ready > 0 then
+    raise exception 'all active characters must be ready for convergence';
+  end if;
+
+  if p_close_chapter and (
+       v_progress.segment < v_time.minimum_cycles_per_chapter
+       or v_goal_ready < v_total
+       or v_goal_strong < 1
+     ) then
+    raise exception 'chapter cannot be closed at this convergence';
+  end if;
+
+  if p_close_chapter then
+    if v_oldest_age >= 300 or v_progress.chapter >= 30 then
+      v_ellipse_months := 120;
+    elsif v_oldest_age >= 150 or v_progress.chapter >= 20 then
+      v_ellipse_months := 60;
+    elsif v_oldest_age >= 50 or v_progress.chapter >= 12 or v_highest_status >= 4 then
+      v_ellipse_months := 24;
+    elsif v_oldest_age >= 20 or v_progress.chapter >= 8 or v_highest_status >= 3 then
+      v_ellipse_months := 12;
+    elsif v_oldest_age >= 5 or v_progress.chapter >= 4 or v_highest_status >= 2 then
+      v_ellipse_months := 3;
+    else
+      v_ellipse_months := 1;
+    end if;
+  end if;
+
+  v_absolute_month :=
+    v_progress.year * 12
+    + (v_time.month - 1)
+    + v_time.cycle_months
+    + v_ellipse_months;
+  v_next_year := v_absolute_month / 12;
+  v_next_month := mod(v_absolute_month, 12) + 1;
+  v_next_chapter := case when p_close_chapter then v_progress.chapter + 1 else v_progress.chapter end;
+  v_next_segment := case when p_close_chapter then 1 else v_progress.segment + 1 end;
+
+  update public.wod_chronicle_progress
+  set year = v_next_year,
+      chapter = v_next_chapter,
+      segment = v_next_segment,
+      updated_at = now()
+  where game_id = p_game_id
+  returning * into v_progress;
+
+  update public.wod_chronicle_time
+  set month = v_next_month,
+      updated_at = now()
+  where game_id = p_game_id
+  returning * into v_time;
+
+  update public.wod_player_characters
+  set chronicle_year = v_next_year,
+      chapter = v_next_chapter,
+      segment = v_next_segment,
+      local_night = 1,
+      ready_for_convergence = false,
+      experience = experience + case
+        when p_close_chapter and goal_progress >= 5 then 2
+        when p_close_chapter and goal_progress >= 2 then 1
+        else 0 end,
+      personal_influence = personal_influence + case
+        when p_close_chapter and goal_progress >= 5 then 1.0
+        when p_close_chapter and goal_progress >= 2 then 0.5
+        else 0 end,
+      reputation = least(3, reputation + case
+        when p_close_chapter and goal_progress >= 5 then 1
+        else 0 end),
+      status = least(5, status + case
+        when p_close_chapter and goal_progress >= 7 and status = 0 then 1
+        else 0 end),
+      goal_progress = case when p_close_chapter then 0 else goal_progress end,
+      updated_at = now()
+  where game_id = p_game_id
+    and is_active
+    and chapter = v_old_chapter
+    and segment = v_old_segment;
+
+  return jsonb_build_object(
+    'progress', to_jsonb(v_progress),
+    'time', to_jsonb(v_time),
+    'chapter_closed', p_close_chapter,
+    'ellipse_months', v_ellipse_months
+  );
+end;
+$$;
+
+revoke all on function public.wod_resolve_temporal_convergence(text,boolean)
+  from public, anon, authenticated;
+grant execute on function public.wod_resolve_temporal_convergence(text,boolean)
   to service_role;
