@@ -5,6 +5,7 @@ from enum import Enum
 from typing import Any, Mapping, Sequence
 
 from .chronicle import PlayerCharacter
+from .consequences import DegreIssue, consequence_graduee
 from .dice import rouse_check
 from .mecaniques_vampiriques import (
     bonus_coup_de_sang,
@@ -122,6 +123,7 @@ def _finaliser_leviers(
 ) -> SituationResolution:
     details = list(notes)
     volonte = profile_initial.willpower
+    consequence = consequence_graduee(resolution.choice, resolution.dice)
 
     if resolution.dice.relances_volonte > 0:
         volonte = max(0, volonte - 1)
@@ -131,11 +133,13 @@ def _finaliser_leviers(
 
     usure = perte_volonte_apres_echec(resolution.choice, resolution.dice)
     if usure > 0 and volonte > 0:
+        depense_effective = min(volonte, usure)
         volonte = max(0, volonte - usure)
         details.append(
-            "L'échec mental ou social est assez net pour infliger 1 point d'usure de Volonté."
+            f"La pression de l'échec inflige {depense_effective} point(s) d'usure de Volonté."
         )
 
+    details.append(consequence.texte)
     profil_final = replace(
         resolution.profile,
         bonus_resolution=0,
@@ -147,10 +151,18 @@ def _finaliser_leviers(
     nouveau_detail = " ".join(
         part for part in (detail_leviers, detail_existant) if part
     )
+    nouveaux_tags = tuple(
+        sorted(set(resolution.outcome.tags + (consequence.degre.value,)))
+    )
     return replace(
         resolution,
         profile=profil_final,
-        outcome=replace(resolution.outcome, detail=nouveau_detail),
+        outcome=replace(
+            resolution.outcome,
+            summary=f"{resolution.choice.label} — {consequence.degre.value}.",
+            detail=nouveau_detail,
+            tags=nouveaux_tags,
+        ),
     )
 
 
@@ -299,24 +311,27 @@ def free_action_situations(
 def _event_budget(character: PlayerCharacter, resolution: SituationResolution) -> tuple[int, str]:
     dice = resolution.dice
     effect = resolution.choice.effect
+    degre = consequence_graduee(resolution.choice, dice).degre
     if effect == "sire_refuse" and not dice.success:
         memory = memory_for(resolution.simulation, resolution.situation.source_actor_id, character)
         severe = resolution.outcome.updated_character.sire_relation <= 1 or (
             memory is not None and memory.grievance_count >= 2
         )
-        if severe or dice.bestial_failure:
+        if severe or degre == DegreIssue.ECHEC_GRAVE:
             return 0, "Votre sire transforme le conflit en sanction et vous retient jusqu'à l'approche de l'aube."
         return 0, "Le conflit avec votre sire consume le reste de la nuit."
-    if dice.bestial_failure:
-        return 0, "La complication provoquée par la Bête consume le reste de la nuit."
-    if dice.critical and not dice.messy_critical:
-        return 2, "Vous réglez l'événement assez vite pour conserver presque toute votre nuit."
+    if degre == DegreIssue.ECHEC_GRAVE:
+        return 0, "La gravité de l'échec consume le reste de la nuit et ouvre une complication durable."
+    if degre == DegreIssue.ECHEC_SERIEUX:
+        return 0, "L'échec vous coûte assez de temps ou de ressources pour compromettre le reste de la nuit."
+    if degre == DegreIssue.ECHEC_LIMITE:
+        return 1, "L'échec reste contenu ; une dernière entreprise importante demeure possible."
+    if degre == DegreIssue.REUSSITE_EXCEPTIONNELLE:
+        return 2, "Vous réglez l'événement avec assez de maîtrise pour conserver presque toute votre nuit."
     if dice.success and effect in {"political_intel", "cautious_distance"}:
         return 2, "L'affaire est réglée rapidement ; la nuit est encore jeune."
     if dice.success:
         return 1, "L'événement a pris du temps, mais une occasion importante reste possible."
-    if effect in {"political_intel", "cautious_distance"}:
-        return 1, "Vous perdez du temps, mais la nuit n'est pas terminée."
     return 0, "L'échec et ses conséquences consument le temps restant avant l'aube."
 
 
@@ -382,9 +397,13 @@ def resolve_free_action(
     )
     cost = remaining_actions if situation.id.startswith("hunt_") and choice_id == "careful_hunt" else 1
     left = max(0, remaining_actions - cost)
-    if resolution.dice.bestial_failure:
+    degre = consequence_graduee(resolution.choice, resolution.dice).degre
+    if degre == DegreIssue.ECHEC_GRAVE:
         left = 0
-        consequence = "La Bête transforme l'échec en complication : le reste de la nuit est perdu."
+        consequence = "La gravité de l'échec transforme la situation en complication et consume le reste de la nuit."
+    elif degre == DegreIssue.ECHEC_SERIEUX:
+        left = 0
+        consequence = "L'échec sérieux absorbe le temps restant avant l'aube."
     elif cost >= remaining_actions:
         consequence = "Cette entreprise occupe tout le temps restant avant l'aube."
     elif left == 1:
@@ -415,6 +434,7 @@ def log_entry(kind: str, result: NightStepResult) -> dict[str, Any]:
         "detail": r.outcome.detail,
         "successes": r.dice.successes,
         "difficulty": r.dice.difficulty,
+        "degre_issue": consequence_graduee(r.choice, r.dice).degre.value,
         "relances_volonte": r.dice.relances_volonte,
         "remaining_actions_after": result.remaining_actions,
         "consequence": result.consequence,
