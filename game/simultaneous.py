@@ -14,6 +14,11 @@ from .actions import apply_action
 from .agency import apply_member_refusal, evaluate_member_mission
 from .config import DEFAULT_RULES, GameRules
 from .coteries import initialize_coteries
+from .diplomatic_pacts import (
+    breach_diplomatic_pacts,
+    diplomatic_pact_bonus,
+    register_reciprocal_diplomatic_pacts,
+)
 from .domains import open_domain_dispute
 from .factions import initialize_factions
 from .information import investigation_rumor_event
@@ -63,6 +68,13 @@ def _investigation_subject(state: GameState, action: GameAction) -> str | None:
     ).id
 
 
+def _diplomacy_target_clan(state: GameState, action: GameAction) -> str | None:
+    if action.target_character_id:
+        target = state.characters.get(action.target_character_id)
+        return target.clan_id if target else None
+    return action.target_clan_id
+
+
 def resolve_actions_simultaneously(
     state: GameState,
     actions: list[GameAction],
@@ -87,6 +99,7 @@ def resolve_actions_simultaneously(
     new_grievances: list[object] = []
     new_disputes: list[object] = []
     events: list[GameEvent] = []
+    executed_actions: list[GameAction] = []
 
     for action in sorted(actions, key=_action_key):
         trial = deepcopy(baseline)
@@ -96,10 +109,44 @@ def resolve_actions_simultaneously(
         else:
             event = apply_action(trial, action, rules)
 
+        action_executed = (
+            (agency is None or agency.obeys)
+            and event.category not in {"opposition", "coterie", "agency"}
+        )
+        if action_executed:
+            executed_actions.append(action)
+
+        # Un pacte déjà actif au début de la nuit facilite la coopération. Un pacte
+        # conclu cette nuit ne bénéficie donc pas rétroactivement aux négociations
+        # qui l'ont créé, ce qui respecte le snapshot simultané.
+        if action_executed and action.action_type == ActionType.DIPLOMACY:
+            target_clan_id = _diplomacy_target_clan(baseline, action)
+            if target_clan_id:
+                pact_bonus = diplomatic_pact_bonus(
+                    baseline,
+                    action.clan_id,
+                    target_clan_id,
+                    rules,
+                )
+                if pact_bonus:
+                    trial.clan_states[action.clan_id].relations[target_clan_id] = (
+                        trial.clan_states[action.clan_id].relations.get(target_clan_id, 0.0)
+                        + pact_bonus
+                    )
+                    trial.clan_states[target_clan_id].relations[action.clan_id] = (
+                        trial.clan_states[target_clan_id].relations.get(action.clan_id, 0.0)
+                        + pact_bonus
+                    )
+                    event = GameEvent(
+                        night=event.night,
+                        category=event.category,
+                        message=f"{event.message} Le pacte actif renforce la coopération (+{pact_bonus}).",
+                        audience_clan_ids=event.audience_clan_ids,
+                    )
+
         if (
-            agency is None or agency.obeys
-        ) and (
-            action.action_type == ActionType.BRACONNAGE
+            action_executed
+            and action.action_type == ActionType.BRACONNAGE
             and action.target_domain_id in baseline.domains
             and trial.domains[action.target_domain_id].pressure
             > baseline.domains[action.target_domain_id].pressure
@@ -120,7 +167,7 @@ def resolve_actions_simultaneously(
         events.append(event)
 
         if (
-            (agency is None or agency.obeys)
+            action_executed
             and action.action_type == ActionType.INVESTIGATE
             and "obtient de nouveaux renseignements" in event.message
         ):
@@ -286,6 +333,11 @@ def resolve_actions_simultaneously(
             severity=dispute.severity,
             public=dispute.public,
         )
+
+    # Les ruptures ne concernent que les pactes actifs au début de la nuit. Les
+    # pactes issus d'une diplomatie réciproque deviennent actifs ensuite.
+    events.extend(breach_diplomatic_pacts(state, executed_actions, rules))
+    events.extend(register_reciprocal_diplomatic_pacts(state, executed_actions, rules))
 
     initialize_factions(state)
     return events

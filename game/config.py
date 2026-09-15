@@ -73,6 +73,14 @@ class GameRules:
     clandestine_embrace_prince_relation_loss: float = 5.0
     clandestine_embrace_reputation_loss: int = 1
 
+    # V0.17 : deux Primogènes qui se choisissent mutuellement en Diplomatie
+    # concluent un pacte de coopération temporaire. Le pacte récompense la
+    # coopération et rend les manœuvres hostiles politiquement coûteuses.
+    diplomatic_pact_duration_nights: int = 3
+    diplomatic_pact_diplomacy_bonus: int = 1
+    diplomatic_pact_breach_relation_loss: float = 2.0
+    diplomatic_pact_breach_stability_loss: float = 1.0
+
     approve_relation_support: float = 3.0
     approve_relation_neutral: float = 0.0
     approve_relation_oppose: float = -8.0
