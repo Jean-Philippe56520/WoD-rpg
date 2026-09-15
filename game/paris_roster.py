@@ -14,13 +14,6 @@ SIMULATION_POLICIES = {"active_named", "context_only", "forbidden"}
 
 @dataclass(frozen=True)
 class Paris1435RosterEntry:
-    """Audited availability of one named actor or collective in Paris 1435.
-
-    A collective entry is intentionally allowed. It lets the Chronicle represent
-    a clan/faction that is certainly present without inventing a leader or named
-    member when the source does not provide one for the exact date.
-    """
-
     id: str
     label: str
     kind: str
@@ -57,285 +50,180 @@ class RosterConflict:
     note: str = ""
 
 
-# Named actors already used by the simulation. Exact physical presence is less
-# certain for some provincial Ventrue than their membership in Alexandre's wider
-# political network; this is represented by certainty rather than invented facts.
+def _named(
+    id: str,
+    label: str,
+    clan_id: str | None,
+    status: str,
+    location: str,
+    certainty: str,
+    source_keys: tuple[str, ...],
+    policy: str,
+    note: str = "",
+) -> Paris1435RosterEntry:
+    return Paris1435RosterEntry(
+        id=id,
+        label=label,
+        kind="named_vampire",
+        clan_id=clan_id,
+        status=status,
+        location=location,
+        certainty=certainty,
+        source_keys=source_keys,
+        simulation_policy=policy,
+        note=note,
+    )
+
+
+def _collective(
+    id: str,
+    label: str,
+    clan_id: str,
+    status: str,
+    location: str,
+    certainty: str,
+    source_keys: tuple[str, ...],
+    policy: str = "context_only",
+    note: str = "",
+) -> Paris1435RosterEntry:
+    return Paris1435RosterEntry(
+        id=id,
+        label=label,
+        kind="collective",
+        clan_id=clan_id,
+        status=status,
+        location=location,
+        certainty=certainty,
+        source_keys=source_keys,
+        simulation_policy=policy,
+        note=note,
+    )
+
+
+# The eight active_named entries deliberately mirror the historical NPC seed.
+# A character can be historically interesting without being eligible for runtime
+# injection in 1435.
 NAMED_ROSTER: tuple[Paris1435RosterEntry, ...] = (
-    Paris1435RosterEntry(
-        "npc_alexandre",
-        "Alexandre",
-        "named_vampire",
-        "ventrue",
-        "present",
-        "Paris",
-        "certain",
-        ("alexandre", "alexandre_pouvoir", "chronologie"),
-        "active_named",
+    _named(
+        "npc_alexandre", "Alexandre", "ventrue", "present", "Paris", "certain",
+        ("alexandre", "alexandre_pouvoir", "chronologie"), "active_named",
         "Prince reconnu mais pouvoir effectif contesté en 1435.",
     ),
-    Paris1435RosterEntry(
-        "npc_saviarre",
-        "Saviarre",
-        "named_vampire",
-        "ventrue",
-        "present",
-        "Paris",
-        "high",
-        ("alexandre", "alexandre_pouvoir", "lignees_ventrue"),
-        "active_named",
+    _named(
+        "npc_saviarre", "Saviarre", "ventrue", "present", "Paris", "high",
+        ("alexandre", "alexandre_pouvoir", "lignees_ventrue"), "active_named",
         "Conseillère et infante d'Alexandre dans la continuité retenue.",
     ),
-    Paris1435RosterEntry(
-        "npc_beatrix",
-        "Béatrix",
-        "named_vampire",
-        "toreador",
-        "present",
-        "Paris",
-        "high",
-        ("beatrix", "alexandre_pouvoir"),
-        "active_named",
+    _named(
+        "npc_beatrix", "Béatrix", "toreador", "present", "Paris", "high",
+        ("beatrix", "alexandre_pouvoir"), "active_named",
     ),
-    Paris1435RosterEntry(
-        "npc_villon",
-        "François Villon",
-        "named_vampire",
-        "toreador",
-        "present",
-        "Paris",
-        "high",
-        ("francois_villon", "chronologie"),
-        "active_named",
+    _named(
+        "npc_villon", "François Villon", "toreador", "present", "Paris", "high",
+        ("francois_villon", "chronologie"), "active_named",
     ),
-    Paris1435RosterEntry(
-        "npc_violetta",
-        "Violetta",
-        "named_vampire",
-        "toreador",
-        "present",
-        "Paris",
-        "medium",
-        ("violetta", "alexandre_pouvoir"),
-        "active_named",
-        "La continuité est cohérente avec sa présence, mais la preuve ponctuelle 1435 est moins directe.",
+    _named(
+        "npc_violetta", "Violetta", "toreador", "present", "Paris", "medium",
+        ("violetta", "alexandre_pouvoir"), "active_named",
+        "Présence cohérente avec la continuité retenue, mais preuve ponctuelle 1435 moins directe.",
     ),
-    Paris1435RosterEntry(
-        "npc_magnerius",
-        "Magnerius de Sens",
-        "named_vampire",
-        "ventrue",
-        "present",
-        "Paris / réseau français d'Alexandre",
-        "medium",
-        ("magnerius", "alexandre_pouvoir", "chronologie"),
-        "active_named",
-        "Son appartenance au réseau fidèle est solide ; sa localisation exacte pendant toute l'année 1435 est moins directe.",
+    _named(
+        "npc_magnerius", "Magnerius de Sens", "ventrue", "present",
+        "Paris / réseau français d'Alexandre", "medium",
+        ("magnerius", "alexandre_pouvoir", "chronologie"), "active_named",
+        "Réseau fidèle solide ; localisation exacte pendant toute l'année 1435 moins directe.",
     ),
-    Paris1435RosterEntry(
-        "npc_pompignan",
-        "Pierre Emmanuel de Pompignan",
-        "named_vampire",
-        "ventrue",
-        "present",
-        "Paris / réseau français d'Alexandre",
-        "medium",
-        ("pompignan", "alexandre_pouvoir", "chronologie"),
-        "active_named",
-        "Présence 1435 conservée prudemment ; sa fiche personnelle et la chronologie générale divergent sur sa torpeur autour de 1481.",
+    _named(
+        "npc_pompignan", "Pierre Emmanuel de Pompignan", "ventrue", "present",
+        "Paris / réseau français d'Alexandre", "medium",
+        ("pompignan", "alexandre_pouvoir", "chronologie"), "active_named",
+        "Présence conservée prudemment ; contradiction documentée autour de sa torpeur en 1481.",
     ),
-    Paris1435RosterEntry(
-        "npc_henri_preux",
-        "Henri le Preux",
-        "named_vampire",
-        "ventrue",
-        "external",
-        "Bourges",
-        "high",
-        ("henri_preux", "alexandre_pouvoir", "chronologie"),
-        "active_named",
-        "Acteur extérieur du réseau français ; il peut agir politiquement mais n'est pas un résident parisien.",
+    _named(
+        "npc_henri_preux", "Henri le Preux", "ventrue", "external", "Bourges", "high",
+        ("henri_preux", "alexandre_pouvoir", "chronologie"), "active_named",
+        "Acteur extérieur du réseau français, jamais traité comme résident parisien.",
     ),
-    Paris1435RosterEntry(
-        "npc_childeberd",
-        "Childeberd",
-        "named_vampire",
-        "brujah",
-        "unverified",
-        "Paris ?",
-        "low",
-        ("principaux_clans_an_mil", "chronologie"),
-        "forbidden",
-        "Rôle documenté en 1148 ; aucune preuve auditée ne suffit encore à confirmer survie et présence en 1435.",
+    _named(
+        "npc_childeberd", "Childeberd", "brujah", "unverified", "Paris ?", "low",
+        ("principaux_clans_an_mil", "chronologie"), "forbidden",
+        "Rôle confirmé en 1148 ; survie et présence 1435 non établies.",
     ),
-    Paris1435RosterEntry(
-        "npc_mithras",
-        "Mithras",
-        "named_vampire",
-        "ventrue",
-        "external",
-        "Londres / réseaux anglais et français",
-        "high",
-        ("alexandre_pouvoir", "chronologie"),
-        "context_only",
-        "Puissance extérieure pesant sur Paris ; ne doit pas être traité comme résident.",
+    _named(
+        "npc_mithras", "Mithras", "ventrue", "external", "Londres / réseaux anglais", "high",
+        ("alexandre_pouvoir", "chronologie"), "context_only",
+        "Puissance extérieure liée aux offensives contre Alexandre, pas résident parisien.",
     ),
-    Paris1435RosterEntry(
-        "npc_anne_bourgogne",
-        "Anne de Bourgogne",
-        "named_vampire",
-        None,
-        "external",
-        "Réseau bourguignon",
-        "medium",
-        ("alexandre_pouvoir",),
-        "context_only",
-        "Prince vampirique extérieure citée comme influence majeure ; aucun clan n'est inventé.",
+    _named(
+        "npc_anne_bourgogne", "Anne de Bourgogne", None, "historical", "Réseau bourguignon", "medium",
+        ("chronologie",), "forbidden",
+        "Prince vampire influente en 1392 ; activité personnelle exacte en 1435 non démontrée.",
     ),
-    Paris1435RosterEntry(
-        "npc_louis_orleans",
-        "Louis d'Orléans",
-        "named_vampire",
-        None,
-        "historical",
-        "Réseau d'Orléans",
-        "high",
-        ("alexandre_pouvoir",),
-        "forbidden",
-        "Influence extérieure explicitement attestée en 1392 ; son statut personnel exact en 1435 n'est pas établi.",
+    _named(
+        "npc_louis_orleans", "Louis d'Orléans", None, "historical", "Réseau d'Orléans", "high",
+        ("chronologie",), "forbidden",
+        "Prince vampire influent en 1392 ; statut personnel exact en 1435 non établi.",
     ),
-    Paris1435RosterEntry(
-        "npc_henri_orleans",
-        "Henri d'Orléans",
-        "named_vampire",
-        None,
-        "unverified",
-        "Réseau d'Orléans",
-        "medium",
-        ("alexandre_pouvoir",),
-        "forbidden",
-        "Allié d'Alexandre dans la recomposition postérieure à 1407 ; présence/activité exacte en 1435 à confirmer.",
+    _named(
+        "npc_henri_orleans", "Henri d'Orléans", None, "unverified", "Réseau d'Orléans", "medium",
+        ("chronologie",), "forbidden",
+        "Allié d'Alexandre après 1407 ; activité exacte en 1435 à confirmer.",
     ),
-    Paris1435RosterEntry(
-        "npc_helene",
-        "Hélène",
-        "named_vampire",
-        "toreador",
-        "unverified",
-        "Hors de Paris / localisation 1435 inconnue",
-        "medium",
-        ("francois_villon",),
-        "forbidden",
-        "Sire de Villon ; elle l'abandonne immédiatement après son Étreinte, sans preuve de résidence parisienne en 1435.",
+    _named(
+        "npc_helene", "Hélène", "toreador", "unverified", "Localisation 1435 inconnue", "medium",
+        ("francois_villon",), "forbidden",
+        "Sire de Villon ; le lien de lignée ne prouve pas une résidence parisienne en 1435.",
     ),
 )
 
 
-# Collective presence is the safe default when sources establish a clan in Paris
-# but do not provide a reliable named roster for 1435.
+# Collective entries are first-class roster data. They allow a clan/faction to
+# exist politically without fabricating a leader when the exact individual roster
+# is not documented.
 COLLECTIVE_ROSTER: tuple[Paris1435RosterEntry, ...] = (
-    Paris1435RosterEntry(
-        "collective_ventrue_paris",
-        "Ventrue de Paris",
-        "collective",
-        "ventrue",
-        "present",
-        "Paris et réseau princier",
-        "certain",
-        ("alexandre", "alexandre_pouvoir", "lignees_ventrue"),
-        "context_only",
+    _collective(
+        "collective_ventrue_paris", "Ventrue de Paris", "ventrue", "present",
+        "Paris et réseau princier", "certain", ("alexandre", "alexandre_pouvoir", "lignees_ventrue"),
     ),
-    Paris1435RosterEntry(
-        "collective_toreador_paris",
-        "Toréador de Paris",
-        "collective",
-        "toreador",
-        "present",
-        "Paris",
-        "high",
+    _collective(
+        "collective_toreador_paris", "Toréador de Paris", "toreador", "present", "Paris", "high",
         ("alexandre_pouvoir", "beatrix", "francois_villon", "violetta"),
-        "context_only",
     ),
-    Paris1435RosterEntry(
-        "collective_brujah_paris",
-        "Brujah de Paris",
-        "collective",
-        "brujah",
-        "present",
-        "Paris / Cour des Miracles",
-        "high",
-        ("alexandre_pouvoir", "chronologie"),
-        "context_only",
-        "Le clan est explicitement renforcé par Alexandre après 1407 puis représenté dans la Cour des Miracles.",
+    _collective(
+        "collective_brujah_paris", "Brujah de Paris", "brujah", "present",
+        "Paris / Cour des Miracles", "high", ("alexandre_pouvoir", "chronologie"),
+        note="Alexandre renforce les Brujah en 1407 ; ils participent au contre-pouvoir des Miracles.",
     ),
-    Paris1435RosterEntry(
-        "collective_malkavian_paris",
-        "Malkaviens de Paris",
-        "collective",
-        "malkavian",
-        "present",
-        "Paris / Cour des Miracles",
-        "high",
-        ("alexandre_pouvoir",),
-        "context_only",
+    _collective(
+        "collective_malkavian_paris", "Malkaviens de Paris", "malkavian", "present",
+        "Paris / Cour des Miracles", "high", ("alexandre_pouvoir",),
     ),
-    Paris1435RosterEntry(
-        "collective_gangrel_paris",
-        "Gangrels de Paris",
-        "collective",
-        "gangrel",
-        "present",
-        "Paris / Cour des Miracles",
-        "high",
-        ("alexandre_pouvoir", "chronologie"),
-        "context_only",
-        "Alexandre se réconcilie avec les Gangrels après 1407 ; le clan participe ensuite au contre-pouvoir de la Cour des Miracles.",
+    _collective(
+        "collective_gangrel_paris", "Gangrels de Paris", "gangrel", "present",
+        "Paris / Cour des Miracles", "high", ("alexandre_pouvoir", "chronologie"),
+        note="Réconciliation de principe avec Alexandre après 1407 puis présence dans le contre-pouvoir.",
     ),
-    Paris1435RosterEntry(
-        "collective_nosferatu_paris",
-        "Nosferatus de Paris",
-        "collective",
-        "nosferatu",
-        "present",
-        "Paris / Cour des Miracles",
-        "high",
-        ("alexandre_pouvoir",),
-        "context_only",
+    _collective(
+        "collective_nosferatu_paris", "Nosferatus de Paris", "nosferatu", "present",
+        "Paris / Cour des Miracles", "high", ("alexandre_pouvoir",),
     ),
-    Paris1435RosterEntry(
-        "collective_tremere_paris",
-        "Tremeres de Paris",
-        "collective",
-        "tremere",
-        "present",
-        "Paris",
-        "medium",
+    _collective(
+        "collective_tremere_paris", "Tremeres de Paris", "tremere", "unverified", "Paris ?", "medium",
         ("chronologie", "alexandre_pouvoir", "paris_tremere"),
-        "context_only",
-        "Implantation ancienne, revers majeur en 1307 puis continuité d'un clan parisien ; les individus et la puissance exacte en 1435 restent inconnus.",
+        note=(
+            "Implantation ancienne et revers de 1307 établis ; la page de clan confirme une histoire parisienne "
+            "ancienne mais ne suffit pas à démontrer une présence continue exactement en 1435."
+        ),
     ),
-    Paris1435RosterEntry(
-        "collective_gargoyle_paris",
-        "Gargouilles de Paris",
-        "collective",
-        "gargoyle",
-        "present",
-        "Paris / service des Magi Tremeres",
-        "high",
-        ("paris_gargouille", "chronologie"),
-        "context_only",
-        "Paris by Night indique une présence continue de deux ou trois Gargouilles depuis la prise de fonction de Goratrix.",
+    _collective(
+        "collective_gargoyle_paris", "Gargouilles de Paris", "gargoyle", "present",
+        "Paris / service des Magi Tremeres", "high", ("paris_gargouille", "chronologie"),
+        note="La page indique une présence continue de deux ou trois Gargouilles depuis Goratrix.",
     ),
-    Paris1435RosterEntry(
-        "collective_lasombra_paris",
-        "Lasombra de Paris",
-        "collective",
-        "lasombra",
-        "absent",
-        "Hors de la capitale",
-        "high",
-        ("chronologie",),
-        "forbidden",
-        "La chronologie indique l'expulsion de tous les Lasombra de la capitale en 1226 ; aucune réinstallation antérieure à 1435 n'est actuellement auditée.",
+    _collective(
+        "collective_lasombra_paris", "Lasombra de Paris", "lasombra", "absent",
+        "Hors de la capitale", "high", ("chronologie",), "forbidden",
+        "Tous les Lasombra sont chassés de la capitale en 1226 ; aucune réinstallation pré-1435 auditée.",
     ),
 )
 
@@ -370,7 +258,7 @@ PARIS_1435_FACTION_ROSTER: tuple[Paris1435FactionRoster, ...] = (
         ),
         "high",
         ("alexandre_pouvoir",),
-        "Les clans membres sont sourcés ; aucun chef ou membre individuel n'est inventé pour remplir le roster.",
+        "Clans composants sourcés ; aucun dirigeant nommé n'est inventé.",
     ),
 )
 
@@ -381,24 +269,24 @@ ROSTER_CONFLICTS: tuple[RosterConflict, ...] = (
         "Torpeur de Pierre Emmanuel de Pompignan et activité autour de 1481",
         ("pompignan", "chronologie"),
         (
-            "La fiche personnelle indique qu'il tombe en torpeur et se réveille vingt ans après la mort d'Alexandre.",
-            "La chronologie générale le place parmi les Ventrue provinciaux impliqués dans la succession ouverte en 1481.",
+            "La fiche personnelle le fait tomber en torpeur puis se réveiller vingt ans après la mort d'Alexandre.",
+            "La chronologie générale le place parmi les Ventrue provinciaux impliqués dans la succession de 1481.",
         ),
         None,
-        "Aucune version n'est effacée. Le conflit n'empêche pas à lui seul une présence en 1435, mais interdit de traiter son activité de 1481 comme certaine.",
+        "Aucune version n'est effacée ; son activité de 1481 ne doit pas être traitée comme certaine.",
     ),
 )
 
 
 OPEN_ROSTER_GAPS: tuple[str, ...] = (
-    "Aucun membre Brujah de la Cour des Miracles n'est encore nommé avec une preuve spécifique à 1435.",
-    "Aucun membre Malkavien de la Cour des Miracles n'est encore nommé avec une preuve spécifique à 1435.",
-    "Aucun membre Gangrel de la Cour des Miracles n'est encore nommé avec une preuve spécifique à 1435.",
-    "Aucun membre Nosferatu de la Cour des Miracles n'est encore nommé avec une preuve spécifique à 1435.",
-    "Le roster individuel Tremere de 1435 reste inconnu malgré une continuité collective suffisamment étayée.",
+    "Aucun membre Brujah de la Cour des Miracles n'est nommé avec une preuve spécifique à 1435.",
+    "Aucun membre Malkavien de la Cour des Miracles n'est nommé avec une preuve spécifique à 1435.",
+    "Aucun membre Gangrel de la Cour des Miracles n'est nommé avec une preuve spécifique à 1435.",
+    "Aucun membre Nosferatu de la Cour des Miracles n'est nommé avec une preuve spécifique à 1435.",
+    "La présence et le roster individuel Tremere en 1435 restent à confirmer après le revers de 1307.",
     "Les Gargouilles sont attestées collectivement, mais aucun individu parisien de 1435 n'est identifié avec certitude.",
-    "Le statut exact en 1435 de Louis d'Orléans, Henri d'Orléans et Childeberd reste à établir.",
-    "La localisation exacte de Magnerius et de Pompignan pendant toute l'année 1435 reste moins directe que leur appartenance au réseau d'Alexandre.",
+    "Le statut exact en 1435 de Louis d'Orléans, Anne de Bourgogne, Henri d'Orléans et Childeberd reste à établir.",
+    "La localisation exacte de Magnerius et Pompignan pendant toute l'année 1435 reste moins directe que leur réseau politique.",
 )
 
 
@@ -428,28 +316,30 @@ def validate_paris_1435_roster() -> None:
         for source_key in entry.source_keys:
             if source_key not in PARIS_CORPUS_SOURCES:
                 raise ValueError(f"Unknown source {source_key} for roster entry {entry.id}")
-        if entry.simulation_policy == "active_named" and entry.kind != "named_vampire":
-            raise ValueError(f"Only named vampires can be active NPCs: {entry.id}")
-        if entry.simulation_policy == "active_named" and entry.status not in {"present", "external"}:
-            raise ValueError(f"Unavailable actor cannot be active in simulation: {entry.id}")
+        if entry.simulation_policy == "active_named":
+            if entry.kind != "named_vampire":
+                raise ValueError(f"Only named vampires can be active NPCs: {entry.id}")
+            if entry.status not in {"present", "external"}:
+                raise ValueError(f"Unavailable actor cannot be active in simulation: {entry.id}")
         if entry.status in {"absent", "unverified", "historical"} and entry.simulation_policy == "active_named":
             raise ValueError(f"Unsafe active roster entry: {entry.id}")
 
     active_seed_ids = {seed.id for seed in PARIS_1435_NPCS}
     audited_active_ids = {entry.id for entry in NAMED_ROSTER if entry.simulation_policy == "active_named"}
     if active_seed_ids != audited_active_ids:
-        missing = sorted(active_seed_ids - audited_active_ids)
-        extra = sorted(audited_active_ids - active_seed_ids)
-        raise ValueError(f"Simulation seed/roster mismatch; missing={missing}, extra={extra}")
+        raise ValueError(
+            "Simulation seed/roster mismatch; "
+            f"missing={sorted(active_seed_ids - audited_active_ids)}, "
+            f"extra={sorted(audited_active_ids - active_seed_ids)}"
+        )
 
     seed_by_id = {seed.id: seed for seed in PARIS_1435_NPCS}
     for actor_id in active_seed_ids:
         seed = seed_by_id[actor_id]
         entry = ROSTER_BY_ID[actor_id]
-        if seed.location_1435 == "Paris" and entry.status != "present":
-            raise ValueError(f"Local seed is not audited present: {actor_id}")
-        if seed.location_1435 != "Paris" and entry.status != "external":
-            raise ValueError(f"External seed is not audited external: {actor_id}")
+        expected_status = "present" if seed.location_1435 == "Paris" else "external"
+        if entry.status != expected_status:
+            raise ValueError(f"Seed location is incompatible with roster status: {actor_id}")
         if entry.certainty not in {"certain", "high", "medium"}:
             raise ValueError(f"Active seed certainty is too low: {actor_id}")
 
@@ -469,38 +359,34 @@ def validate_paris_1435_roster() -> None:
                 raise ValueError(f"Unknown roster member {member_id} in {faction.faction_id}")
 
     miracles = next(item for item in PARIS_1435_FACTION_ROSTER if item.faction_id == "faction_court_miracles")
-    miracle_clans = {ROSTER_BY_ID[member_id].clan_id for member_id in miracles.member_entry_ids}
-    if miracle_clans != {"brujah", "malkavian", "gangrel", "nosferatu"}:
+    miracle_members = tuple(ROSTER_BY_ID[member_id] for member_id in miracles.member_entry_ids)
+    if {item.clan_id for item in miracle_members} != {"brujah", "malkavian", "gangrel", "nosferatu"}:
         raise ValueError("Court of Miracles collective clan roster is incomplete")
-    if any(ROSTER_BY_ID[member_id].status != "present" for member_id in miracles.member_entry_ids):
-        raise ValueError("Court of Miracles contains a collective not audited present in 1435")
+    if any(item.kind != "collective" or item.status != "present" for item in miracle_members):
+        raise ValueError("Court of Miracles must use confirmed collective entries")
 
     for conflict in ROSTER_CONFLICTS:
-        if not conflict.source_keys:
-            raise ValueError(f"Roster conflict has no source: {conflict.id}")
+        if len(conflict.claims) < 2:
+            raise ValueError(f"Roster conflict needs at least two claims: {conflict.id}")
         for source_key in conflict.source_keys:
             if source_key not in PARIS_CORPUS_SOURCES:
                 raise ValueError(f"Unknown source {source_key} for roster conflict {conflict.id}")
-        if len(conflict.claims) < 2:
-            raise ValueError(f"Roster conflict needs at least two claims: {conflict.id}")
 
 
 def roster_audit_report() -> dict[str, int]:
     validate_paris_1435_roster()
-    named = NAMED_ROSTER
-    collectives = COLLECTIVE_ROSTER
     return {
         "entries_total": len(PARIS_1435_ROSTER),
-        "named_total": len(named),
-        "named_present": sum(entry.status == "present" for entry in named),
-        "named_external": sum(entry.status == "external" for entry in named),
-        "named_unverified": sum(entry.status == "unverified" for entry in named),
-        "named_historical": sum(entry.status == "historical" for entry in named),
-        "collective_total": len(collectives),
-        "collective_present": sum(entry.status == "present" for entry in collectives),
-        "collective_absent": sum(entry.status == "absent" for entry in collectives),
-        "collective_unverified": sum(entry.status == "unverified" for entry in collectives),
-        "simulation_active_named": sum(entry.simulation_policy == "active_named" for entry in named),
+        "named_total": len(NAMED_ROSTER),
+        "named_present": sum(entry.status == "present" for entry in NAMED_ROSTER),
+        "named_external": sum(entry.status == "external" for entry in NAMED_ROSTER),
+        "named_unverified": sum(entry.status == "unverified" for entry in NAMED_ROSTER),
+        "named_historical": sum(entry.status == "historical" for entry in NAMED_ROSTER),
+        "collective_total": len(COLLECTIVE_ROSTER),
+        "collective_present": sum(entry.status == "present" for entry in COLLECTIVE_ROSTER),
+        "collective_absent": sum(entry.status == "absent" for entry in COLLECTIVE_ROSTER),
+        "collective_unverified": sum(entry.status == "unverified" for entry in COLLECTIVE_ROSTER),
+        "simulation_active_named": sum(entry.simulation_policy == "active_named" for entry in NAMED_ROSTER),
         "factions": len(PARIS_1435_FACTION_ROSTER),
         "roster_conflicts": len(ROSTER_CONFLICTS),
         "open_gaps": len(OPEN_ROSTER_GAPS),
