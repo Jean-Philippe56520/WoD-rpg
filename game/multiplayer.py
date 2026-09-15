@@ -1,7 +1,15 @@
 from __future__ import annotations
 
 from .config import DEFAULT_RULES, GameRules
-from .models import ClanNightOrders, ClanNightReport, NightStatus, PoliticalRequestStatus
+from .models import (
+    ClanNightOrders,
+    ClanNightReport,
+    DomainDecisionType,
+    HuntingRightStatus,
+    NightStatus,
+    PoliticalRequestStatus,
+    PromiseStatus,
+)
 from .persistence import GameRepository
 from .resolution import resolve_night
 from .world import REQUIRED_CLANS, candidates_from_state, create_initial_game_state
@@ -74,6 +82,46 @@ class MultiplayerGameService:
             raise ValueError("Political request decisions require V0.9 orders")
 
         primogen_id = state.clan_states[clan_id].clan.primogen_id
+
+        if orders.version >= 4:
+            if len(orders.domain_decisions) > self.rules.domain_decisions_per_clan:
+                raise ValueError(
+                    f"Maximum {self.rules.domain_decisions_per_clan} territorial decision per night"
+                )
+            for item in orders.domain_decisions:
+                domain = state.domains.get(item.domain_id)
+                if domain is None:
+                    raise ValueError("Unknown domain in territorial decision")
+                if domain.holder_id != primogen_id:
+                    raise ValueError("A Primogen may only administer a Domain they personally hold")
+                if item.decision == DomainDecisionType.GRANT_HUNTING_RIGHT:
+                    if not item.beneficiary_id or item.beneficiary_id not in state.characters:
+                        raise ValueError("A hunting-right concession requires a valid beneficiary")
+                    if item.beneficiary_id == primogen_id:
+                        raise ValueError("A Domain holder already has hunting access")
+                    if not 1 <= item.duration_nights <= 10:
+                        raise ValueError("A hunting-right concession must last between 1 and 10 nights")
+                else:
+                    right = state.hunting_rights.get(item.right_id or "")
+                    if right is None or right.domain_id != item.domain_id:
+                        raise ValueError("Revocation requires a hunting right from the selected Domain")
+                    if right.status not in {HuntingRightStatus.ACTIVE, HuntingRightStatus.CONTESTED}:
+                        raise ValueError("Only an active hunting right may be revoked")
+
+            promise_ids = list(orders.promise_fulfillments)
+            if len(promise_ids) != len(set(promise_ids)):
+                raise ValueError("A promise may be fulfilled only once per order")
+            for promise_id in promise_ids:
+                promise = state.promises.get(promise_id)
+                if promise is None or promise.promisor_id != primogen_id:
+                    raise ValueError("A Primogen may only fulfill their own political promises")
+                if promise.status != PromiseStatus.PENDING:
+                    raise ValueError("Only a pending promise may be fulfilled")
+                if state.night > promise.due_night:
+                    raise ValueError("An overdue promise can no longer be fulfilled")
+        elif orders.domain_decisions or orders.promise_fulfillments:
+            raise ValueError("Territorial decisions and promise fulfillment require V0.10 orders")
+
         if state.prince_id is None:
             if orders.vote is None:
                 raise ValueError("A Primogen vote is required while the Praxis is unresolved")
@@ -129,6 +177,8 @@ class MultiplayerGameService:
             votes = {}
             petitions = []
             request_decisions = []
+            domain_decisions = []
+            promise_fulfillments = []
             for clan_id, orders in bundle.orders_by_clan.items():
                 self.validate_orders(bundle.state, clan_id, orders)
                 actions.extend(orders.actions)
@@ -137,6 +187,12 @@ class MultiplayerGameService:
                 petitions.extend((clan_id, petition) for petition in orders.embrace_petitions)
                 request_decisions.extend(
                     (clan_id, decision) for decision in orders.request_decisions
+                )
+                domain_decisions.extend(
+                    (clan_id, decision) for decision in orders.domain_decisions
+                )
+                promise_fulfillments.extend(
+                    (clan_id, promise_id) for promise_id in orders.promise_fulfillments
                 )
 
             previous_event_count = len(bundle.state.events)
@@ -147,6 +203,8 @@ class MultiplayerGameService:
                 candidates_from_state(bundle.state),
                 embrace_petitions=petitions,
                 request_decisions=request_decisions,
+                domain_decisions=domain_decisions,
+                promise_fulfillments=promise_fulfillments,
                 rules=self.rules,
             )
             new_events = resolution.state.events[previous_event_count:]
