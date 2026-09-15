@@ -7,6 +7,7 @@ from .chronicle import PlayerCharacter, PoliticalOffice
 from .chronicle_politics import actor_offices, assign_office, clear_explicit_offices
 from .chronicle_simulation import SimulationBeat, SimulationState
 from .era import era_for_year
+from .paris_1435_context import active_historical_political_pressures
 from .relationship_memory import record_relationship_memory
 
 if TYPE_CHECKING:
@@ -85,9 +86,9 @@ def assess_praxis_pressure(
 ) -> PraxisPressure:
     """Assess political pressure without inventing a second political state.
 
-    The score is an internal decision aid built only from persistent state:
-    relations, Domain security, Prestations and the current Prince's own weight.
-    It is never rendered to the player as a raw number.
+    The score is an internal decision aid built from persistent state plus the
+    explicitly audited historical context active at the state's date. It is
+    never rendered to the player as a raw number.
     """
 
     characters = tuple(characters)
@@ -159,6 +160,14 @@ def assess_praxis_pressure(
         pressure += debts_owed * 4
         reasons.append("Des Prestations dues par le Prince réduisent sa liberté politique.")
     pressure -= debts_held * 2
+
+    historical_pressures = active_historical_political_pressures(
+        state.year,
+        target_office=PoliticalOffice.PRINCE.value,
+    )
+    if historical_pressures:
+        pressure += sum(item.intensity * 8 for item in historical_pressures)
+        reasons.extend(item.internal_reason for item in historical_pressures)
 
     score = max(0, min(100, pressure))
     challengers, player_candidates = _candidate_ids(state, characters, prince_id=prince_id)
