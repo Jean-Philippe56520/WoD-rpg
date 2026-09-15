@@ -6,7 +6,11 @@ from typing import Any, Mapping, Sequence
 
 from .chronicle import PlayerCharacter
 from .dice import rouse_check
-from .mecaniques_vampiriques import bonus_coup_de_sang, usage_discipline
+from .mecaniques_vampiriques import (
+    bonus_coup_de_sang,
+    perte_volonte_apres_echec,
+    usage_discipline,
+)
 from .praxis import apply_praxis_claim
 from .relationship_memory import memory_for
 from .situations import Situation, SituationResolution, generate_situations, resolve_situation
@@ -116,17 +120,27 @@ def _finaliser_leviers(
     profile_initial,
     notes: tuple[str, ...],
 ) -> SituationResolution:
-    profil_final = replace(resolution.profile, bonus_resolution=0)
     details = list(notes)
+    volonte = profile_initial.willpower
 
     if resolution.dice.relances_volonte > 0:
-        profil_final = replace(
-            profil_final,
-            willpower=max(0, profile_initial.willpower - 1),
-        )
+        volonte = max(0, volonte - 1)
         details.append(
             f"Volonté : 1 point dépensé pour relancer {resolution.dice.relances_volonte} dé(s) ordinaire(s)."
         )
+
+    usure = perte_volonte_apres_echec(resolution.choice, resolution.dice)
+    if usure > 0 and volonte > 0:
+        volonte = max(0, volonte - usure)
+        details.append(
+            "L'échec mental ou social est assez net pour infliger 1 point d'usure de Volonté."
+        )
+
+    profil_final = replace(
+        resolution.profile,
+        bonus_resolution=0,
+        willpower=volonte,
+    )
 
     detail_existant = resolution.outcome.detail.strip()
     detail_leviers = " ".join(details).strip()
