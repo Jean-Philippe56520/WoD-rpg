@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import streamlit as st
 
+from .beast import active_compulsion, clear_compulsion, compulsion_pool_modifier
 from .chronicle import CLAN_LABELS, OFFICE_LABELS
 from .chronicle_politics import primary_office
 from .chronicle_service import ChronicleService, chronicle_time_label, ellipse_label
@@ -95,6 +96,20 @@ def _render_choice_form(
     )
     st.caption(preview.hint)
 
+    compulsion = active_compulsion(character, profile)
+    compulsion_modifier = compulsion_pool_modifier(character, profile, situation, selected)
+    if compulsion is not None:
+        if compulsion_modifier:
+            st.warning(
+                f"Compulsion — **{compulsion.nom}** : cette approche s'écarte de ce que réclame la Bête "
+                f"et subira {compulsion_modifier} dés."
+            )
+        else:
+            st.info(
+                f"Compulsion — **{compulsion.nom}** : cette approche répond à l'impulsion actuelle de la Bête. "
+                "Une réussite peut la dissiper."
+            )
+
     with st.form(f"{key_prefix}_{situation.id}_{choice_id}"):
         st.markdown("**Leviers vampiriques**")
         usage = usage_discipline(profile, situation, selected)
@@ -131,6 +146,18 @@ def _render_choice_form(
         else:
             st.caption("Les dés de Faim ne peuvent jamais être relancés par la Volonté.")
 
+        chevaucher_vague_faim = False
+        if selected.effect in {"hunt", "hunt_social"} and character.hunger >= 4:
+            st.markdown("**La Bête est proche.**")
+            chevaucher_vague_faim = st.checkbox(
+                "Chevaucher la vague si le goût du sang déclenche une Frénésie de Faim",
+                key=f"{key_prefix}_ride_wave_{situation.id}_{choice_id}",
+            )
+            st.caption(
+                "Si la chasse réussit, goûter le sang à cette Faim peut provoquer une Frénésie. "
+                "Chevaucher la vague signifie ne pas tenter d'y résister."
+            )
+
         free_intent = st.text_area(
             "Précision libre",
             placeholder="Votre manière d'agir, ce que vous cachez, ce que vous cherchez vraiment…",
@@ -143,6 +170,7 @@ def _render_choice_form(
         depenser_volonte=depenser_volonte,
         coup_de_sang=coup_de_sang,
         utiliser_discipline=utiliser_discipline,
+        chevaucher_vague_faim=chevaucher_vague_faim,
     )
 
 
@@ -178,6 +206,11 @@ def render_chronicle_header(character, profile, progress, simulation) -> None:
     pos1.metric("Statut", character.status)
     pos2.metric("Influence", f"{character.personal_influence:.1f}")
     pos3.metric("Expérience", character.experience)
+
+    compulsion = active_compulsion(character, profile)
+    if compulsion is not None:
+        focus = f" — {profile.compulsion_focus}" if profile.compulsion_focus else ""
+        st.warning(f"**Compulsion : {compulsion.nom}**{focus}. {compulsion.description}")
 
 
 def render_chronicle_journal(store, character) -> None:
@@ -388,6 +421,9 @@ def render_night_cycle(
             character, night_state, nights_per_segment=progress.nights_per_segment,
         )
         persisted_profile = profile_store.ensure_for_character(finished)
+        if persisted_profile.current_compulsion:
+            persisted_profile = clear_compulsion(persisted_profile)
+            profile_store.save(persisted_profile)
         profil_recupere, recuperation = recuperer_volonte_fin_nuit(persisted_profile)
         if recuperation > 0:
             profile_store.save(profil_recupere)
