@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import uuid
 
 import streamlit as st
 
@@ -17,6 +18,7 @@ from game.browser_session import (
     persist_device_refresh_token,
     read_device_refresh_token,
 )
+from game.chronicle_ui import render_chronicle_app
 from game.coterie_ui import render_coteries_panel
 from game.court_ui import render_court_panel
 from game.crisis_ui import render_crises_panel
@@ -42,7 +44,7 @@ AUTH_SEEN_KEY = "wod_auth_seen_in_streamlit_session"
 LOCAL_PLAYER_KEY = "wod_local_player_id"
 
 st.set_page_config(
-    page_title="WoD RPG - Chronique politique",
+    page_title="WoD RPG - Chronique vampirique",
     page_icon="🩸",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -115,6 +117,65 @@ def _restore_persistent_session(backend: str) -> None:
         clear_device_refresh_token()
 
 
+def _render_authentication(auth: SupabaseAuthClient) -> None:
+    st.title("WoD RPG — Les Premières Nuits")
+    st.subheader("Connexion à la chronique")
+    st.write(
+        "Votre compte retrouve automatiquement votre vampire sur cet appareil. "
+        "La connexion est distincte de votre personnage : celui-ci sera créé après authentification."
+    )
+    login_tab, signup_tab = st.tabs(["Connexion", "Créer un compte"])
+
+    with login_tab:
+        with st.form("launcher_login_form"):
+            email = st.text_input("Email", key="launcher_login_email")
+            password = st.text_input(
+                "Mot de passe", type="password", key="launcher_login_password"
+            )
+            submitted = st.form_submit_button(
+                "Se connecter", type="primary", use_container_width=True
+            )
+        if submitted:
+            try:
+                session = auth.sign_in(email, password)
+                st.session_state[AUTH_SESSION_KEY] = session
+                st.session_state[AUTH_SEEN_KEY] = True
+                persist_device_refresh_token(session.refresh_token)
+                st.rerun()
+            except (AuthError, ValueError) as exc:
+                st.error(str(exc))
+
+    with signup_tab:
+        with st.form("launcher_signup_form"):
+            email = st.text_input("Email", key="launcher_signup_email")
+            password = st.text_input(
+                "Mot de passe", type="password", key="launcher_signup_password"
+            )
+            password_confirm = st.text_input(
+                "Confirmer le mot de passe",
+                type="password",
+                key="launcher_signup_password_confirm",
+            )
+            submitted = st.form_submit_button("Créer mon compte", use_container_width=True)
+        if submitted:
+            if password != password_confirm:
+                st.error("Les deux mots de passe ne correspondent pas.")
+            else:
+                try:
+                    session = auth.sign_up(email, password)
+                    if session:
+                        st.session_state[AUTH_SESSION_KEY] = session
+                        st.session_state[AUTH_SEEN_KEY] = True
+                        persist_device_refresh_token(session.refresh_token)
+                        st.rerun()
+                    st.success(
+                        "Compte créé. Si un email de confirmation a été envoyé, validez-le puis connectez-vous."
+                    )
+                except (AuthError, ValueError) as exc:
+                    st.error(str(exc))
+    st.stop()
+
+
 def _assign_workshop_players(repo: RuntimeGameRepository) -> None:
     repo.ensure_game(
         PRODUCTION_GAME_ID,
@@ -129,10 +190,10 @@ def _assign_workshop_players(repo: RuntimeGameRepository) -> None:
 mode = st.sidebar.radio(
     "Mode d'accès",
     options=(PRODUCTION_MODE, WORKSHOP_MODE),
-    format_func=lambda value: "Chronique" if value == PRODUCTION_MODE else "Atelier (test/dev)",
+    format_func=lambda value: "Chronique" if value == PRODUCTION_MODE else "Atelier legacy (test/dev)",
     key="wod_runtime_mode_selector",
 )
-st.sidebar.caption("Moteur V0.20 — crises jouables")
+st.sidebar.caption("Moteur V0.21 — personnage joueur et nuits personnelles")
 set_runtime_mode(mode)
 
 try:
@@ -151,30 +212,65 @@ def _runtime_create_repository(*args, **kwargs):
 
 if mode == PRODUCTION_MODE:
     _restore_persistent_session(backend)
-else:
-    st.sidebar.warning("MODE ATELIER — données séparées de la chronique principale")
-    try:
-        _assign_workshop_players(runtime_repo)
-    except ValueError as exc:
-        st.error(f"Atelier incohérent : {exc}")
-        st.stop()
+    if backend == "Supabase":
+        auth = _launcher_auth_client()
+        session = st.session_state.get(AUTH_SESSION_KEY)
+        if not isinstance(session, AuthSession):
+            _render_authentication(auth)
+        player_id = session.user_id
+        player_name = session.email.split("@", 1)[0] if session.email else "Joueur"
+        with st.sidebar:
+            if session.email:
+                st.caption(f"Compte : {session.email}")
+            if st.button("Se déconnecter", use_container_width=True):
+                try:
+                    auth.sign_out(session.access_token)
+                except AuthError:
+                    pass
+                st.session_state.pop(AUTH_SESSION_KEY, None)
+                st.session_state[AUTH_SEEN_KEY] = False
+                clear_device_refresh_token()
+                st.rerun()
+    else:
+        if LOCAL_PLAYER_KEY not in st.session_state:
+            st.session_state[LOCAL_PLAYER_KEY] = f"local:{uuid.uuid4().hex}"
+        player_id = st.session_state[LOCAL_PLAYER_KEY]
+        player_name = "Joueur local"
 
-    selected_clan = st.sidebar.selectbox(
-        "Incarner le clan",
-        options=REQUIRED_CLANS,
-        format_func=lambda clan_id: clan_id.capitalize(),
-        key="wod_workshop_clan",
+    render_chronicle_app(
+        runtime_repo,
+        player_id=player_id,
+        player_name=player_name,
+        backend_label=str(backend_label),
     )
-    st.session_state[LOCAL_PLAYER_KEY] = WORKSHOP_PLAYERS[selected_clan][0]
+    st.stop()
 
-    if st.sidebar.button("Réinitialiser l'Atelier", use_container_width=True):
-        runtime_repo.reset_workshop_game(
-            WORKSHOP_GAME_NAME,
-            create_initial_game_state(),
-            REQUIRED_CLANS,
-        )
-        _assign_workshop_players(runtime_repo)
-        st.rerun()
+
+# L'Atelier conserve volontairement le moteur V0.20.1 comme banc de test et de
+# comparaison pendant la migration. Il ne touche jamais à la chronique 1435.
+st.sidebar.warning("MODE ATELIER — moteur politique V0.20.1 isolé")
+try:
+    _assign_workshop_players(runtime_repo)
+except ValueError as exc:
+    st.error(f"Atelier incohérent : {exc}")
+    st.stop()
+
+selected_clan = st.sidebar.selectbox(
+    "Incarner le clan",
+    options=REQUIRED_CLANS,
+    format_func=lambda clan_id: clan_id.capitalize(),
+    key="wod_workshop_clan",
+)
+st.session_state[LOCAL_PLAYER_KEY] = WORKSHOP_PLAYERS[selected_clan][0]
+
+if st.sidebar.button("Réinitialiser l'Atelier", use_container_width=True):
+    runtime_repo.reset_workshop_game(
+        WORKSHOP_GAME_NAME,
+        create_initial_game_state(),
+        REQUIRED_CLANS,
+    )
+    _assign_workshop_players(runtime_repo)
+    st.rerun()
 
 ui_path = Path(__file__).with_name("game_ui.py")
 repository_factory.create_repository = _runtime_create_repository
