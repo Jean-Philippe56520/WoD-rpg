@@ -59,8 +59,9 @@ def test_transferred_influence_follows_allied_primogens_candidate_choice():
         votes,
         seed_candidates(),
     )
-    # Les 13,5 points de l'opposition Ventrue suivent le vote du Primogène Brujah.
-    assert result.candidate_totals["primogen_toreador"] == 66.0
+    # Le poids Brujah complet, qui inclut les 13,5 points transférés par
+    # l'opposition Ventrue, suit ensuite le choix de vote du Primogène Brujah.
+    assert result.candidate_totals["primogen_toreador"] == 138.0
 
 
 def test_configurable_opposition_transfer_ratio_is_respected():
