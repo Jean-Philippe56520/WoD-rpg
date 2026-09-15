@@ -5,12 +5,22 @@ from dataclasses import dataclass
 from typing import Iterable, Mapping
 
 from .actions import apply_action
+from .autonomy import resolve_autonomous_reactions
 from .config import DEFAULT_RULES, GameRules
-from .coteries import determine_coterie_stances, initialize_coteries
 from .embrace import process_primogen_petition
-from .models import Candidate, EmbracePetitionOrder, GameAction, GameEvent, GameState, PrimogenVote
+from .factions import determine_faction_stances, initialize_factions
+from .models import (
+    Candidate,
+    EmbracePetitionOrder,
+    GameAction,
+    GameEvent,
+    GameState,
+    PoliticalRequestDecisionOrder,
+    PrimogenVote,
+)
 from .offices import install_prince
 from .politics import VoteResolution, resolve_praxis_vote
+from .social_politics import generate_requests_for_night, process_request_decision
 
 
 @dataclass(frozen=True)
@@ -59,39 +69,46 @@ def resolve_night(
     votes: Mapping[str, PrimogenVote],
     candidates: Iterable[Candidate],
     embrace_petitions: Iterable[tuple[str, EmbracePetitionOrder]] = (),
+    request_decisions: Iterable[tuple[str, PoliticalRequestDecisionOrder]] = (),
     rules: GameRules = DEFAULT_RULES,
 ) -> NightResolution:
     next_state = deepcopy(state)
-    initialize_coteries(next_state)
+    initialize_factions(next_state)
     actions = _validate_action_budget(next_state, actions, rules)
     candidates = list(candidates)
     candidate_map = {candidate.id: candidate for candidate in candidates}
 
+    # Les décisions internes précèdent les missions : elles peuvent modifier la coopération immédiate.
+    for clan_id, order in request_decisions:
+        next_state.events.append(
+            process_request_decision(next_state, clan_id, order.request_id, order.decision)
+        )
+
     for action in actions:
         next_state.events.append(apply_action(next_state, action, rules))
 
-    initialize_coteries(next_state)
+    initialize_factions(next_state)
     vote_result: VoteResolution | None = None
     if next_state.prince_id is None:
-        stances = determine_coterie_stances(next_state)
+        stances = determine_faction_stances(next_state)
         for clan_id, stance in stances.items():
             clan_state = next_state.clan_states[clan_id]
             leader = next_state.characters[clan_state.opposition_leader_id]
             if stance.supports_primogen:
                 message = (
-                    f"L'opposition de {clan_state.clan.name}, menée par {leader.name}, soutient "
+                    f"La faction d'opposition de {clan_state.clan.name}, menée par {leader.name}, soutient "
                     f"le Primogène pour ce vote (score {stance.support_score:.0f})."
                 )
             else:
                 ally_name = next_state.characters[stance.allied_primogen_id].name
                 message = (
-                    f"L'opposition de {clan_state.clan.name}, menée par {leader.name}, refuse "
+                    f"La faction d'opposition de {clan_state.clan.name}, menée par {leader.name}, refuse "
                     f"le Primogène et active son alliance avec {ally_name}."
                 )
             next_state.events.append(
                 GameEvent(
                     night=next_state.night,
-                    category="coterie",
+                    category="faction",
                     message=message,
                     audience_clan_ids=(clan_id,),
                 )
@@ -119,7 +136,7 @@ def resolve_night(
                     night=next_state.night,
                     category="praxis",
                     message=(
-                        "La Praxis reste contestée : aucun candidat ne rassemble une majorité "
+                        "La Praxis reste contestée : aucun candidat ne rassemble une reconnaissance "
                         "politique suffisante. La Camarilla locale s'affaiblit."
                     ),
                 )
@@ -144,6 +161,10 @@ def resolve_night(
                 )
             next_state = process_primogen_petition(next_state, clan_id, petition, rules)
 
-    initialize_coteries(next_state)
+    # Réactions post-résolution : dettes appelées, griefs, promesses et opportunités de faction.
+    next_state.events.extend(resolve_autonomous_reactions(next_state))
+    initialize_factions(next_state)
+
     next_state.night += 1
+    generate_requests_for_night(next_state)
     return NightResolution(state=next_state, vote=vote_result)
