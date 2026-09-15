@@ -6,7 +6,7 @@ class GameRules:
     opposition_transfer_ratio: float = 0.50
     current_support_threshold: float = 50.0
     current_default_loyalty: float = 50.0
-    ideology_support_scale: float = 0.15
+    ideology_support_scale: float = 0.10
     praxis_recognition_threshold: float = 0.50
     actions_per_clan: int = 2
     embrace_petitions_per_clan: int = 1

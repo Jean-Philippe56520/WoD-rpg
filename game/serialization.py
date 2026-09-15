@@ -5,6 +5,8 @@ from dataclasses import asdict
 
 from .models import (
     ActionType,
+    AxisPolarity,
+    BloodRank,
     Character,
     Clan,
     ClanNightOrders,
@@ -21,6 +23,75 @@ from .models import (
 )
 
 
+def _character_to_dict(character: Character) -> dict:
+    return {
+        "id": character.id,
+        "name": character.name,
+        "clan_id": character.clan_id,
+        "personal_influence": character.personal_influence,
+        "humanity_axis": character.humanity_axis.value,
+        "tradition_axis": character.tradition_axis.value,
+        "physical": character.physical,
+        "social": character.social,
+        "mental": character.mental,
+        "expertises": list(character.expertises),
+        "disciplines": dict(character.disciplines),
+        "blood_rank": character.blood_rank.value,
+        "backgrounds": dict(character.backgrounds),
+        "loyalty": character.loyalty,
+        "ambition": character.ambition,
+        "is_primogen": character.is_primogen,
+    }
+
+
+def _legacy_axis(value: dict, new_key: str, old_key: str) -> AxisPolarity:
+    if new_key in value:
+        return AxisPolarity(value[new_key])
+    legacy_value = float(value.get(old_key, 0.0))
+    return AxisPolarity.PLUS if legacy_value >= 0 else AxisPolarity.MINUS
+
+
+def _character_from_dict(value: dict, default_sheet: Character | None = None) -> Character:
+    """Lit V0.7 et enrichit les anciens personnages V0.6 avec leur fiche canonique.
+
+    Les données politiques vivantes stockées en partie (influence, loyauté, ambition,
+    fonctions et axes historiques) restent prioritaires. Seuls les nouveaux champs de
+    fiche absents sont complétés depuis le personnage initial correspondant.
+    """
+    physical_default = default_sheet.physical if default_sheet else 1
+    social_default = default_sheet.social if default_sheet else 1
+    mental_default = default_sheet.mental if default_sheet else 1
+    expertise_default = default_sheet.expertises if default_sheet else ()
+    discipline_default = default_sheet.disciplines if default_sheet else {}
+    blood_rank_default = default_sheet.blood_rank if default_sheet else BloodRank.NEWBORN
+    background_default = default_sheet.backgrounds if default_sheet else {}
+
+    return Character(
+        id=value["id"],
+        name=value["name"],
+        clan_id=value.get("clan_id"),
+        personal_influence=float(value.get("personal_influence", 0.0)),
+        humanity_axis=_legacy_axis(value, "humanity_axis", "humanism"),
+        tradition_axis=_legacy_axis(value, "tradition_axis", "tradition"),
+        physical=int(value.get("physical", physical_default)),
+        social=int(value.get("social", social_default)),
+        mental=int(value.get("mental", mental_default)),
+        expertises=tuple(value.get("expertises", expertise_default)),
+        disciplines={
+            k: int(v)
+            for k, v in value.get("disciplines", discipline_default).items()
+        },
+        blood_rank=BloodRank(value.get("blood_rank", blood_rank_default.value)),
+        backgrounds={
+            k: int(v)
+            for k, v in value.get("backgrounds", background_default).items()
+        },
+        loyalty=float(value.get("loyalty", 50.0)),
+        ambition=float(value.get("ambition", 50.0)),
+        is_primogen=bool(value.get("is_primogen", False)),
+    )
+
+
 def game_state_to_dict(state: GameState) -> dict:
     return {
         "night": state.night,
@@ -30,7 +101,7 @@ def game_state_to_dict(state: GameState) -> dict:
         "prince_political_capital": state.prince_political_capital,
         "prince_relations": state.prince_relations,
         "praxis_status": state.praxis_status,
-        "characters": {key: asdict(value) for key, value in state.characters.items()},
+        "characters": {key: _character_to_dict(value) for key, value in state.characters.items()},
         "clan_states": {
             key: {
                 "clan": asdict(value.clan),
@@ -67,9 +138,24 @@ def game_state_to_dict(state: GameState) -> dict:
 
 
 def game_state_from_dict(data: dict) -> GameState:
+    character_payloads = data.get("characters", {})
+    defaults: dict[str, Character] = {}
+    if any(
+        "physical" not in value
+        or "expertises" not in value
+        or "disciplines" not in value
+        or "blood_rank" not in value
+        or "backgrounds" not in value
+        for value in character_payloads.values()
+    ):
+        # Import local pour éviter de coupler le chemin de sérialisation au monde au chargement.
+        from .world import seed_characters
+
+        defaults = seed_characters()
+
     characters = {
-        key: Character(**value)
-        for key, value in data.get("characters", {}).items()
+        key: _character_from_dict(value, defaults.get(key))
+        for key, value in character_payloads.items()
     }
     clan_states = {
         key: ClanPoliticalState(

@@ -3,29 +3,37 @@ from __future__ import annotations
 from collections import defaultdict
 
 from .config import DEFAULT_RULES, GameRules
-from .models import Character, GameState, IdeologyQuadrant, PoliticalCurrent
+from .models import AxisPolarity, Character, GameState, IdeologyQuadrant, PoliticalCurrent
 
 
 CURRENT_NAMES = {
-    IdeologyQuadrant.HUMANIST_TRADITIONAL: "Humanistes traditionnels",
-    IdeologyQuadrant.HUMANIST_REFORMIST: "Reformateurs humanistes",
-    IdeologyQuadrant.PREDATORY_TRADITIONAL: "Traditionalistes predateurs",
-    IdeologyQuadrant.PREDATORY_RADICAL: "Radicaux predateurs",
+    IdeologyQuadrant.HUMANIST_TRADITIONAL: "Humanistes traditionalistes",
+    IdeologyQuadrant.HUMANIST_REFORMIST: "Humanistes réformateurs",
+    IdeologyQuadrant.PREDATORY_TRADITIONAL: "Prédateurs traditionalistes",
+    IdeologyQuadrant.PREDATORY_RADICAL: "Prédateurs radicaux",
 }
 
 
-def _clamp_axis(value: float) -> float:
-    return max(-100.0, min(100.0, value))
+def quadrant_for_axes(
+    humanity_axis: AxisPolarity | str,
+    tradition_axis: AxisPolarity | str,
+) -> IdeologyQuadrant:
+    humanity_axis = AxisPolarity(humanity_axis)
+    tradition_axis = AxisPolarity(tradition_axis)
+    if humanity_axis == AxisPolarity.PLUS and tradition_axis == AxisPolarity.PLUS:
+        return IdeologyQuadrant.HUMANIST_TRADITIONAL
+    if humanity_axis == AxisPolarity.PLUS and tradition_axis == AxisPolarity.MINUS:
+        return IdeologyQuadrant.HUMANIST_REFORMIST
+    if humanity_axis == AxisPolarity.MINUS and tradition_axis == AxisPolarity.PLUS:
+        return IdeologyQuadrant.PREDATORY_TRADITIONAL
+    return IdeologyQuadrant.PREDATORY_RADICAL
 
 
 def quadrant_for_values(humanism: float, tradition: float) -> IdeologyQuadrant:
-    if humanism >= 0 and tradition >= 0:
-        return IdeologyQuadrant.HUMANIST_TRADITIONAL
-    if humanism >= 0 and tradition < 0:
-        return IdeologyQuadrant.HUMANIST_REFORMIST
-    if humanism < 0 and tradition >= 0:
-        return IdeologyQuadrant.PREDATORY_TRADITIONAL
-    return IdeologyQuadrant.PREDATORY_RADICAL
+    """Compatibilité V0.6 : convertit d'anciens axes numériques en polarités."""
+    humanity_axis = AxisPolarity.PLUS if humanism >= 0 else AxisPolarity.MINUS
+    tradition_axis = AxisPolarity.PLUS if tradition >= 0 else AxisPolarity.MINUS
+    return quadrant_for_axes(humanity_axis, tradition_axis)
 
 
 def current_id_for(clan_id: str, quadrant: IdeologyQuadrant) -> str:
@@ -37,8 +45,20 @@ def character_current_id(character: Character) -> str | None:
         return None
     return current_id_for(
         character.clan_id,
-        quadrant_for_values(character.humanism, character.tradition),
+        quadrant_for_axes(character.humanity_axis, character.tradition_axis),
     )
+
+
+def ideological_affinity_axes(
+    humanity_a: AxisPolarity | str,
+    tradition_a: AxisPolarity | str,
+    humanity_b: AxisPolarity | str,
+    tradition_b: AxisPolarity | str,
+) -> float:
+    """Affinité compacte : +100 même courant, +50 un axe commun, -100 opposés."""
+    matches = int(AxisPolarity(humanity_a) == AxisPolarity(humanity_b))
+    matches += int(AxisPolarity(tradition_a) == AxisPolarity(tradition_b))
+    return {0: -100.0, 1: 50.0, 2: 100.0}[matches]
 
 
 def ideological_affinity_values(
@@ -47,16 +67,21 @@ def ideological_affinity_values(
     humanism_b: float,
     tradition_b: float,
 ) -> float:
-    distance = abs(humanism_a - humanism_b) + abs(tradition_a - tradition_b)
-    return max(-100.0, min(100.0, 100.0 - distance / 2.0))
+    """Compatibilité V0.6 pour les appels utilisant encore des valeurs numériques."""
+    return ideological_affinity_axes(
+        AxisPolarity.PLUS if humanism_a >= 0 else AxisPolarity.MINUS,
+        AxisPolarity.PLUS if tradition_a >= 0 else AxisPolarity.MINUS,
+        AxisPolarity.PLUS if humanism_b >= 0 else AxisPolarity.MINUS,
+        AxisPolarity.PLUS if tradition_b >= 0 else AxisPolarity.MINUS,
+    )
 
 
 def character_affinity(character_a: Character, character_b: Character) -> float:
-    return ideological_affinity_values(
-        character_a.humanism,
-        character_a.tradition,
-        character_b.humanism,
-        character_b.tradition,
+    return ideological_affinity_axes(
+        character_a.humanity_axis,
+        character_a.tradition_axis,
+        character_b.humanity_axis,
+        character_b.tradition_axis,
     )
 
 
@@ -68,27 +93,33 @@ def build_currents(state: GameState, clan_id: str) -> dict[str, PoliticalCurrent
     ]
     grouped: dict[IdeologyQuadrant, list[Character]] = defaultdict(list)
     for member in members:
-        grouped[quadrant_for_values(member.humanism, member.tradition)].append(member)
+        grouped[quadrant_for_axes(member.humanity_axis, member.tradition_axis)].append(member)
 
     currents: dict[str, PoliticalCurrent] = {}
     for quadrant, current_members in grouped.items():
         influence = sum(member.personal_influence for member in current_members)
-        weights = [max(member.personal_influence, 1.0) for member in current_members]
-        total_weight = sum(weights)
-        centroid_humanism = sum(
-            member.humanism * weight
-            for member, weight in zip(current_members, weights)
-        ) / total_weight
-        centroid_tradition = sum(
-            member.tradition * weight
-            for member, weight in zip(current_members, weights)
-        ) / total_weight
         leader_candidates = [member for member in current_members if member.id != state.prince_id]
         if not leader_candidates:
             leader_candidates = current_members
         leader = max(
             leader_candidates,
             key=lambda member: (member.personal_influence, member.ambition, member.id),
+        )
+        humanity_axis = (
+            AxisPolarity.PLUS
+            if quadrant in {
+                IdeologyQuadrant.HUMANIST_TRADITIONAL,
+                IdeologyQuadrant.HUMANIST_REFORMIST,
+            }
+            else AxisPolarity.MINUS
+        )
+        tradition_axis = (
+            AxisPolarity.PLUS
+            if quadrant in {
+                IdeologyQuadrant.HUMANIST_TRADITIONAL,
+                IdeologyQuadrant.PREDATORY_TRADITIONAL,
+            }
+            else AxisPolarity.MINUS
         )
         current_id = current_id_for(clan_id, quadrant)
         currents[current_id] = PoliticalCurrent(
@@ -99,18 +130,18 @@ def build_currents(state: GameState, clan_id: str) -> dict[str, PoliticalCurrent
             influence=influence,
             leader_id=leader.id,
             member_ids=tuple(member.id for member in current_members),
-            centroid_humanism=centroid_humanism,
-            centroid_tradition=centroid_tradition,
+            humanity_axis=humanity_axis,
+            tradition_axis=tradition_axis,
         )
     return currents
 
 
 def current_affinity(current_a: PoliticalCurrent, current_b: PoliticalCurrent) -> float:
-    return ideological_affinity_values(
-        current_a.centroid_humanism,
-        current_a.centroid_tradition,
-        current_b.centroid_humanism,
-        current_b.centroid_tradition,
+    return ideological_affinity_axes(
+        current_a.humanity_axis,
+        current_a.tradition_axis,
+        current_b.humanity_axis,
+        current_b.tradition_axis,
     )
 
 
@@ -133,11 +164,11 @@ def _default_allied_primogen(state: GameState, clan_id: str, current: PoliticalC
         if other_id == clan_id:
             continue
         primogen = state.characters[other_state.clan.primogen_id]
-        affinity = ideological_affinity_values(
-            current.centroid_humanism,
-            current.centroid_tradition,
-            primogen.humanism,
-            primogen.tradition,
+        affinity = ideological_affinity_axes(
+            current.humanity_axis,
+            current.tradition_axis,
+            primogen.humanity_axis,
+            primogen.tradition_axis,
         )
         candidates.append((affinity, primogen.personal_influence, primogen.id))
     if not candidates:
@@ -172,16 +203,18 @@ def initialize_current_politics(
 def shift_ideology(
     state: GameState,
     character_id: str,
-    humanism_delta: float = 0.0,
-    tradition_delta: float = 0.0,
+    humanity_axis: AxisPolarity | str | None = None,
+    tradition_axis: AxisPolarity | str | None = None,
     rules: GameRules = DEFAULT_RULES,
 ) -> tuple[str | None, str | None]:
     if character_id not in state.characters:
         raise ValueError(f"Unknown character: {character_id}")
     character = state.characters[character_id]
     before = character_current_id(character)
-    character.humanism = _clamp_axis(character.humanism + humanism_delta)
-    character.tradition = _clamp_axis(character.tradition + tradition_delta)
+    if humanity_axis is not None:
+        character.humanity_axis = AxisPolarity(humanity_axis)
+    if tradition_axis is not None:
+        character.tradition_axis = AxisPolarity(tradition_axis)
     after = character_current_id(character)
     initialize_current_politics(state, rules)
     return before, after

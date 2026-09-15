@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from .config import DEFAULT_RULES, GameRules
 from .ideology import build_currents, character_current_id, initialize_current_politics
-from .models import Candidate, Character, GameEvent, GameState
+from .models import AxisPolarity, BloodRank, Candidate, Character, GameEvent, GameState
 
 
 def _current_influence(state: GameState, character: Character) -> float:
@@ -98,9 +98,15 @@ def install_prince(
             name=winner.name,
             clan_id=winner.clan_id,
             personal_influence=18,
-            humanity=7,
-            humanism=0,
-            tradition=0,
+            humanity_axis=AxisPolarity.PLUS,
+            tradition_axis=AxisPolarity.PLUS,
+            physical=1,
+            social=2,
+            mental=1,
+            expertises=("Politique",),
+            disciplines={},
+            blood_rank=BloodRank.ANCILLA,
+            backgrounds={"Influence politique": 1},
             loyalty=50,
             ambition=75,
             is_primogen=False,
