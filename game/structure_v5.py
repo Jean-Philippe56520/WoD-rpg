@@ -18,8 +18,8 @@ STATUTS_V5 = {"intégré", "partiel", "différé", "écarté"}
 
 SYSTEMES_V5: tuple[SystemeV5, ...] = (
     SystemeV5("attributs", "Neuf Attributs", "intégré", "conserver", ("game/vampire_profile.py",), "Force, Dextérité, Vigueur, Charisme, Manipulation, Sang-froid, Intelligence, Astuce et Résolution sont structurés."),
-    SystemeV5("competences", "Compétences", "partiel", "prioritaire", ("game/vampire_profile.py",), "Le moteur ne possède encore qu'un sous-ensemble de Compétences V5 ; il faut compléter la liste avant une progression de personnage avancée."),
-    SystemeV5("specialites", "Spécialités", "différé", "compléter", (), "Aucune Spécialité n'est encore structurée."),
+    SystemeV5("competences", "Compétences", "intégré", "conserver", ("game/vampire_profile.py",), "Les 27 Compétences V5 sont structurées ; les identifiants restent canoniques et l'interface 1435 emploie des libellés médiévaux adaptés."),
+    SystemeV5("specialites", "Spécialités", "intégré", "conserver", ("game/vampire_profile.py",), "Les Spécialités sont persistées par Compétence et ajoutent un dé lorsqu'elles s'appliquent."),
     SystemeV5("resolution", "Attribut + Compétence, D10, réussites sur 6+", "intégré", "conserver", ("game/dice.py", "game/situations.py"), "Socle de résolution de la Chronique."),
     SystemeV5("difficulte", "Difficulté", "intégré", "adapter", ("game/dice.py", "game/situations.py"), "Le seuil exact reste caché ; le joueur reçoit un indice narratif."),
     SystemeV5("faim", "Faim et dés de Faim", "intégré", "conserver", ("game/dice.py", "game/chronicle.py"), "Les dés de Faim remplacent des dés ordinaires dans le groupement."),
@@ -31,7 +31,7 @@ SYSTEMES_V5: tuple[SystemeV5, ...] = (
     SystemeV5("generation", "Génération", "intégré", "conserver", ("game/vampire_profile.py",), "Déduite du sire lors de la création."),
     SystemeV5("puissance_sang", "Puissance du Sang", "partiel", "compléter", ("game/vampire_profile.py", "game/mecaniques_vampiriques.py"), "Le Coup de Sang est géré ; restent notamment guérison vampirique, effets complets de Puissance du Sang et contraintes alimentaires."),
     SystemeV5("guerison", "Guérison vampirique", "différé", "prioritaire", (), "À relier à Santé, aux dégâts et aux Tests d’Exaltation."),
-    SystemeV5("sante", "Santé et dégâts", "différé", "prioritaire", (), "La piste de Santé ainsi que dégâts superficiels et aggravés doivent être ajoutés avant les affrontements physiques importants."),
+    SystemeV5("sante", "Santé et dégâts", "partiel", "compléter", ("game/vampire_profile.py", "game/health.py"), "Santé = Vigueur + 3, dégâts superficiels/aggravés, altération physique et torpeur sont structurés. La guérison vampirique reste à brancher."),
     SystemeV5("humanite", "Humanité, Flétrissures et Remords", "partiel", "prioritaire", ("game/chronicle.py", "game/creation_rules.py"), "Humanité et Convictions existent ; Flétrissures et Remords ne sont pas encore structurés."),
     SystemeV5("convictions", "Convictions", "partiel", "prioritaire", ("game/creation_rules.py", "game/vampire_profile.py"), "Le bonus de Compétence actuellement lié aux Convictions est une ancienne règle maison ; la cible est de les relier à Humanité, Flétrissures et Remords."),
     SystemeV5("attaches", "Attaches humaines", "écarté", "adapter", ("game/vampire_profile.py",), "Les anciennes Attaches ont été retirées du parcours joueur ; si elles restent écartées, Humanité devra s'appuyer sur Convictions, relations et conséquences plutôt que copier V5 à l'identique."),
