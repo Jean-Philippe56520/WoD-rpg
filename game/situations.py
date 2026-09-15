@@ -11,6 +11,7 @@ from .chronicle_simulation import (
 from .clans import situation_bonus
 from .dice import DiceResult, roll_pool
 from .era import CamarillaStage, era_for_year
+from .sire_relations import sire_bond
 from .vampire_profile import VampireProfile
 
 
@@ -43,6 +44,7 @@ class SituationResolution:
     dice: DiceResult
     outcome: NightOutcome
     simulation: SimulationState
+    profile: VampireProfile
 
 
 def _sire_situation(character: PlayerCharacter) -> Situation:
@@ -90,20 +92,66 @@ def _sire_situation(character: PlayerCharacter) -> Situation:
     )
 
 
-def _hunting_situation(character: PlayerCharacter, simulation: SimulationState, year: int) -> Situation:
+def _release_situation(character: PlayerCharacter) -> Situation:
+    return Situation(
+        id="sire_release",
+        title="Faire reconnaître votre autonomie",
+        body=(
+            f"Vous avez désormais assez de poids pour que {character.sire_name} ne puisse plus traiter votre autonomie "
+            "comme une simple insolence. Demander votre libération signifie toutefois perdre le droit implicite de vous "
+            "abriter et de chasser sous sa responsabilité."
+        ),
+        source_actor_id=character.sire_id,
+        tags=("authority", "oath", "court", "politics"),
+        choices=(
+            SituationChoice(
+                "formal_release",
+                "Demander une reconnaissance devant témoins",
+                "Vous faites de votre autonomie une question de réputation et d'usage public.",
+                "charisma",
+                "politics",
+                3,
+                PersonalAction.ELYSIUM,
+                "seek_release",
+            ),
+            SituationChoice(
+                "private_release",
+                "Négocier d'abord seul à seul avec votre sire",
+                "Vous cherchez un accord sans transformer immédiatement la discussion en affrontement public.",
+                "manipulation",
+                "persuasion",
+                3,
+                PersonalAction.VISIT_SIRE,
+                "seek_release",
+            ),
+        ),
+    )
+
+
+def _hunting_situation(
+    character: PlayerCharacter,
+    profile: VampireProfile,
+    simulation: SimulationState,
+    year: int,
+) -> Situation:
     rights = active_hunting_access(simulation, character.character_id, year)
+    preference_text = ""
+    if profile.feeding_preference:
+        preference_text = f" Votre Sang vous contraint ou vous attire vers : {profile.feeding_preference}."
     if rights:
         right = rights[0]
         domain = simulation.domains[right.domain_id]
         body = (
-            f"Votre sire vous tolère encore sur {domain.name}. La zone offre un Viandis de {domain.viandis}/3, "
-            f"mais sa pression actuelle est de {domain.pressure}. Votre droit existe parce que quelqu'un répond de vous."
+            f"Vous êtes autorisé à chasser sur {domain.name}. La zone offre un Viandis de {domain.viandis}/3, "
+            f"mais sa pression actuelle est de {domain.pressure}. Votre accès dépend encore de : {right.source}."
+            + preference_text
         )
     else:
         domain = sorted(simulation.domains.values(), key=lambda item: (item.pressure, -item.viandis, item.id))[0]
         body = (
             f"Vous ne disposez d'aucun droit de chasse reconnu. {domain.name} semble accessible, mais vous y nourrir "
             "sans permission peut créer une dette ou un conflit de Domaine."
+            + preference_text
         )
     return Situation(
         id=f"hunt_{domain.id}",
@@ -125,7 +173,7 @@ def _hunting_situation(character: PlayerCharacter, simulation: SimulationState, 
             SituationChoice(
                 "social_hunt",
                 "Trouver une proie par le contact social",
-                "Vous cherchez une proie qui vienne à vous plutôt que de la traquer.",
+                "Vous cherchez une proie correspondant à votre besoin sans la traquer ouvertement.",
                 "charisma",
                 "insight",
                 2 + domain.masquerade_risk,
@@ -257,16 +305,23 @@ def generate_situations(
     *,
     year: int,
 ) -> tuple[Situation, ...]:
-    situations = [
-        _sire_situation(character),
-        _hunting_situation(character, simulation, year),
-        _political_situation(character, year),
-        _clan_situation(character),
-    ]
+    hunting = _hunting_situation(character, profile, simulation, year)
+    political = _political_situation(character, year)
+    clan = _clan_situation(character)
+    bond = sire_bond(character, profile, era_for_year(year))
+
+    if profile.released_from_sire:
+        if character.hunger >= 4:
+            return (hunting, clan, political)
+        return (political, clan, hunting)
+
+    sire = _sire_situation(character)
+    release = _release_situation(character) if bond.can_seek_release else None
     if character.hunger >= 4:
-        return (situations[1], situations[0], situations[3])
-    index = (character.local_night - 1) % 2
-    return (situations[0], situations[2 + index], situations[1])
+        return (hunting, release or sire, clan)
+    if release is not None:
+        return (release, political if character.local_night % 2 == 0 else clan, hunting)
+    return (sire, political if character.local_night % 2 == 1 else clan, hunting)
 
 
 def _change_domain_risk(simulation: SimulationState, domain_id: str, delta: int) -> SimulationState:
@@ -280,6 +335,16 @@ def _change_domain_risk(simulation: SimulationState, domain_id: str, delta: int)
         pressure=max(0, domain.pressure + (1 if delta > 0 else 0)),
     )
     return replace(simulation, domains=domains)
+
+
+def _remove_sire_hunting_access(simulation: SimulationState, character_id: str) -> SimulationState:
+    right_id = f"right_sire_{character_id}"
+    right = simulation.hunting_rights.get(right_id)
+    if right is None or not right.active:
+        return simulation
+    rights = dict(simulation.hunting_rights)
+    rights[right_id] = replace(right, active=False, source="Accès expiré après émancipation du sire")
+    return replace(simulation, hunting_rights=rights)
 
 
 def resolve_situation(
@@ -311,6 +376,7 @@ def resolve_situation(
     sire_relation = character.sire_relation
     goal_progress = character.goal_progress
     next_simulation = simulation
+    next_profile = profile
     summary = f"{choice.label} — {dice.label}."
     details: list[str] = []
 
@@ -327,10 +393,11 @@ def resolve_situation(
             details.append("Votre manière d'agir laisse cependant une trace dangereuse sur le Domaine.")
     elif choice.effect == "abstain":
         hunger = min(5, hunger + 1)
-        if dice.success:
-            details.append("Vous tenez jusqu'à l'aube, mais votre Faim augmente.")
-        else:
-            details.append("Vous tenez à peine : la prochaine provocation de la Bête sera plus difficile à contenir.")
+        details.append(
+            "Vous tenez jusqu'à l'aube, mais votre Faim augmente."
+            if dice.success
+            else "Vous tenez à peine : la prochaine provocation de la Bête sera plus difficile à contenir."
+        )
     elif choice.effect == "sire_service":
         if dice.success:
             sire_relation = min(3, sire_relation + 1)
@@ -362,6 +429,22 @@ def resolve_situation(
             sire_relation = max(0, sire_relation - 1)
             reputation = max(-3, reputation - 1)
             details.append("Votre refus vous isole sans vous libérer de la responsabilité de votre sire.")
+    elif choice.effect == "seek_release":
+        bond = sire_bond(character, profile, era_for_year(character.chronicle_year))
+        if not bond.can_seek_release:
+            raise ValueError("Character cannot seek release from sire yet")
+        if dice.success:
+            next_profile = replace(profile, released_from_sire=True)
+            next_simulation = _remove_sire_hunting_access(next_simulation, character.character_id)
+            reputation = min(3, reputation + 1)
+            goal_progress += 2
+            details.append(
+                "Votre autonomie est reconnue. Votre sire ne répond plus automatiquement de vous, et son Domaine "
+                "ne constitue plus un droit de chasse implicite."
+            )
+        else:
+            sire_relation = max(0, sire_relation - 1)
+            details.append("Votre demande est refusée. Vous avez néanmoins rendu votre volonté d'indépendance publique.")
     elif choice.effect == "political_intel":
         if dice.success:
             goal_progress += 2 if dice.critical else 1
@@ -418,4 +501,5 @@ def resolve_situation(
         dice=dice,
         outcome=outcome,
         simulation=next_simulation,
+        profile=next_profile,
     )
