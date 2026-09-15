@@ -46,7 +46,7 @@ from game.world import candidates_from_state
 
 st.set_page_config(page_title="WoD RPG - Chronique politique", page_icon="🩸", layout="wide")
 st.title("WoD RPG - Chronique politique")
-st.caption("V0.10 - Domaines, Viandis, Servage, Rempart et politique territoriale")
+st.caption("V0.18 — Praxis contestable, pactes, Étreintes, Faim et politique territoriale")
 
 AUTH_SESSION_KEY = "wod_auth_session"
 LOCAL_PLAYER_KEY = "wod_local_player_id"
@@ -98,6 +98,10 @@ BOON_LEVEL_LABELS = {
     BoonLevel.MAJOR: "Faveur majeure",
     BoonLevel.LIFE: "Dette de vie",
 }
+
+# Le moteur central conserve les libellés historiques dans game.actions. Cette
+# action V0.18 est ajoutée ici pour rester compatible avec les vues V0.10 héritées.
+ACTION_LABELS[ActionType.CHALLENGE_PRAXIS] = "Contester la Praxis"
 
 
 @st.cache_resource
@@ -664,6 +668,8 @@ with night_tab:
                     ]
 
                     options = [ActionType.BUILD_INFLUENCE, ActionType.DIPLOMACY, ActionType.INVESTIGATE]
+                    if actor.id == own_clan.primogen_id and state.prince_id is not None:
+                        options.append(ActionType.CHALLENGE_PRAXIS)
                     if own_targets:
                         options.append(ActionType.CONSOLIDATE_RELATION)
                     if recruit_targets:
@@ -691,7 +697,13 @@ with night_tab:
                     target_clan_id = None
                     target_domain_id = None
 
-                    if action_type == ActionType.DIPLOMACY:
+                    if action_type == ActionType.CHALLENGE_PRAXIS:
+                        st.warning(
+                            "Action publique : votre Primogène engage le poids politique de son clan contre "
+                            "la Praxis reconnue. Si la coalition est insuffisante, le Prince conservera le "
+                            "pouvoir et se souviendra de la contestation."
+                        )
+                    elif action_type == ActionType.DIPLOMACY:
                         target_ids = list(dict.fromkeys(foreign_primogens(state, player_clan) + known_foreign))
                         target_character_id = st.selectbox(
                             "Interlocuteur",
@@ -1111,6 +1123,6 @@ with reports_tab:
                 st.write(f"- {item}")
 
 st.caption(
-    "V0.10 : Domaines personnels, Viandis, Servage, Rempart, droits de chasse, Prestation, "
-    "pression territoriale, intrusion, braconnage et conséquences persistantes."
+    "V0.18 : politique vampirique persistante — Praxis contestable, pactes diplomatiques, Étreintes, "
+    "factions, coteries, Faim, Domaines, Viandis, Servage, Rempart, Prestation et conséquences."
 )
