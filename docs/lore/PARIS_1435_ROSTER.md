@@ -57,7 +57,9 @@ Le corpus établit :
 - une implantation importante dans l'histoire parisienne ;
 - un revers majeur au démantèlement du Temple en 1307.
 
-Le roster individuel exact de **1435** reste insuffisamment documenté. Le registre ne crée donc aucun Magus nommé. La présence collective est conservée comme contexte à certitude moyenne et n'est jamais injectée comme un `NpcState`.
+Ces éléments prouvent une histoire parisienne ancienne, mais **pas une présence continue explicitement attestée en 1435**. Le collectif `collective_tremere_paris` reste donc `unverified`, avec une certitude moyenne et une politique `context_only`.
+
+Aucun Magus nommé n'est créé et aucun `NpcState` Tremere n'est injecté tant qu'une source ne confirme pas la présence à la date exacte. Cette distinction évite de transformer une continuité plausible entre 1307 et le XVIe siècle en certitude historique.
 
 ## Gargouilles
 
@@ -69,13 +71,13 @@ La chronologie indique l'expulsion des Lasombra de la capitale en **1226**. En l
 
 Une absence explicite vaut mieux qu'un silence du roster : elle empêche une génération future de PNJ de réintroduire le clan par défaut.
 
-## Puissances extérieures
+## Puissances extérieures et historiques
 
-Le registre sépare les acteurs présents des puissances capables d'influencer Paris à distance.
+Le registre sépare les acteurs présents des puissances capables d'influencer Paris à distance, et distingue aussi une influence historiquement attestée d'une activité personnelle démontrée précisément en 1435.
 
 ### Mithras
 
-Puissance extérieure liée aux offensives contre Alexandre. Il reste `context_only` : il ne devient pas un résident parisien.
+Puissance extérieure liée aux offensives contre Alexandre. Il reste `external/context_only` : il ne devient pas un résident parisien.
 
 ### Henri le Preux
 
@@ -83,9 +85,9 @@ Installé à Bourges et intégré au réseau français. Il reste un acteur nomm�
 
 ### Louis d'Orléans, Anne de Bourgogne, Henri d'Orléans
 
-La chronologie documente leurs jeux d'influence autour de Paris à la fin du XIVe et au début du XVe siècle. Elle ne suffit pas à elle seule à établir pour chacun une présence personnelle continue à Paris pendant 1435.
+La chronologie documente leurs jeux d'influence autour de Paris à la fin du XIVe et au début du XVe siècle. Elle ne suffit pas à elle seule à établir pour chacun une présence personnelle continue ou une activité certaine pendant 1435.
 
-Le roster les classe donc en `external`, `historical` ou `unverified` selon le niveau de preuve disponible, sans inventer leur clan lorsque celui-ci n'est pas établi par les sources déjà auditées.
+Louis d'Orléans et Anne de Bourgogne sont donc conservés comme acteurs `historical/forbidden` lorsque l'audit prouve leur rôle passé sans établir leur activité exacte en 1435 ; Henri d'Orléans reste `unverified/forbidden`. Aucun clan n'est inventé lorsqu'il n'est pas établi par les sources déjà auditées.
 
 ## Personnages explicitement non injectés
 
@@ -109,9 +111,9 @@ Le rapport doit continuer à afficher au minimum :
 - absence de noms Malkaviens ;
 - absence de noms Gangrels ;
 - absence de noms Nosferatus ;
-- roster individuel Tremere inconnu ;
+- présence et roster individuel Tremere 1435 non confirmés ;
 - roster individuel Gargouille inconnu ;
-- statut exact des acteurs d'Orléans ;
+- statut exact en 1435 des acteurs d'Orléans et de Bourgogne ;
 - localisation exacte de certains Ventrue provinciaux autour de cette période.
 
 Ces lacunes ne sont pas des bugs à masquer. Elles sont des limites documentaires à résoudre progressivement.
@@ -126,4 +128,4 @@ V0.48b et les versions ultérieures doivent consommer cette distinction :
 
 **acteur extérieur → agit par relais, pression ou déplacement** ;
 
-**incertain/absent → aucune apparition automatique**.
+**incertain/absent/historique → aucune apparition automatique**.

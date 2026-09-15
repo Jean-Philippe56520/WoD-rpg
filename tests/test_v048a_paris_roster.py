@@ -24,7 +24,13 @@ def test_roster_is_valid_and_exactly_gates_named_simulation_seed():
 
 
 def test_uncertain_or_historical_named_actors_cannot_become_active_npcs():
-    for actor_id in ("npc_childeberd", "npc_louis_orleans", "npc_henri_orleans", "npc_helene"):
+    for actor_id in (
+        "npc_childeberd",
+        "npc_anne_bourgogne",
+        "npc_louis_orleans",
+        "npc_henri_orleans",
+        "npc_helene",
+    ):
         entry = roster_entry(actor_id)
         assert entry.status in {"unverified", "historical"}
         assert entry.simulation_policy == "forbidden"
@@ -33,23 +39,27 @@ def test_uncertain_or_historical_named_actors_cannot_become_active_npcs():
     state = parisify_simulation(initial_simulation("v048a-uncertain", year=1435))
     assert all(actor_id not in state.npcs for actor_id in (
         "npc_childeberd",
+        "npc_anne_bourgogne",
         "npc_louis_orleans",
         "npc_henri_orleans",
         "npc_helene",
     ))
 
 
-def test_external_powers_remain_contextual_or_explicitly_external():
+def test_external_powers_are_not_confused_with_confirmed_1435_residents():
     mithras = roster_entry("npc_mithras")
     burgundy = roster_entry("npc_anne_bourgogne")
     henri = roster_entry("npc_henri_preux")
 
     assert mithras.status == "external"
     assert mithras.simulation_policy == "context_only"
-    assert burgundy.status == "external"
+
+    assert burgundy.status == "historical"
     assert burgundy.clan_id is None
-    assert burgundy.simulation_policy == "context_only"
+    assert burgundy.simulation_policy == "forbidden"
+
     assert henri.status == "external"
+    assert henri.location == "Bourges"
     assert henri.simulation_policy == "active_named"
 
 
@@ -64,9 +74,10 @@ def test_court_of_miracles_is_represented_by_collectives_without_invented_leader
     assert not any(entry.kind == "named_vampire" and entry.id in faction.member_entry_ids for entry in NAMED_ROSTER)
 
 
-def test_tremere_remain_collective_only_and_never_gain_a_fake_1435_member():
+def test_tremere_remain_unverified_collective_only_and_never_gain_a_fake_1435_member():
     tremere = roster_entry("collective_tremere_paris")
     assert tremere.kind == "collective"
+    assert tremere.status == "unverified"
     assert tremere.certainty == "medium"
     assert tremere.simulation_policy == "context_only"
 
@@ -106,7 +117,9 @@ def test_roster_report_counts_named_collective_and_uncertain_entries():
     assert report["collective_total"] >= 9
     assert report["simulation_active_named"] == len(PARIS_1435_NPCS)
     assert report["named_unverified"] >= 3
+    assert report["named_historical"] >= 2
     assert report["collective_present"] >= 7
+    assert report["collective_unverified"] >= 1
     assert report["collective_absent"] >= 1
     assert report["open_gaps"] >= 8
 
@@ -115,6 +128,7 @@ def test_lore_qa_schema_v3_exposes_roster_and_does_not_hide_gaps():
     report = build_report(1435)
     assert report["schema_version"] == 3
     assert report["roster_1435"]["entries_total"] >= 23
+    assert report["roster_1435"]["collective_unverified"] >= 1
     assert report["roster_entries"]
     assert len(report["roster_open_gaps"]) >= 8
     assert any(item["id"] == "pompignan_torpor_vs_1481" for item in report["roster_conflicts"])
