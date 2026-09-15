@@ -3,6 +3,8 @@ import pytest
 from game.models import (
     ActionType,
     ClanNightOrders,
+    DomainDecisionOrder,
+    DomainDecisionType,
     GameAction,
     PoliticalRequestDecisionOrder,
     PoliticalRequestStatus,
@@ -81,6 +83,20 @@ def v09_orders_for(state, clan_id):
             for request in open_requests
         ),
         version=3,
+    )
+
+
+def v010_orders_for(state, clan_id):
+    previous = v09_orders_for(state, clan_id)
+    return ClanNightOrders(
+        clan_id=previous.clan_id,
+        actions=previous.actions,
+        vote=previous.vote,
+        embrace_petitions=previous.embrace_petitions,
+        request_decisions=previous.request_decisions,
+        domain_decisions=(),
+        promise_fulfillments=(),
+        version=4,
     )
 
 
@@ -190,6 +206,29 @@ def test_live_style_legacy_ventrue_can_resolve_with_v09_other_clans(tmp_path):
     assert repo.get_report(DEFAULT_GAME_ID, 1, "ventrue") is not None
 
 
+def test_live_style_legacy_ventrue_can_resolve_with_v010_other_clans(tmp_path):
+    service, repo = make_service(tmp_path)
+    state = repo.get_game_state(DEFAULT_GAME_ID)
+    players = (("p1", "Alice", "ventrue"), ("p2", "Bob", "toreador"), ("p3", "Cara", "brujah"))
+    for player_id, name, clan_id in players:
+        service.claim_clan(player_id, name, clan_id)
+
+    legacy_ventrue = ClanNightOrders(
+        clan_id="ventrue",
+        actions=(
+            GameAction("ventrue", ActionType.CONSOLIDATE),
+            GameAction("ventrue", ActionType.BUILD_INFLUENCE),
+        ),
+        vote=PrimogenVote("primogen_ventrue", "primogen_ventrue"),
+        version=1,
+    )
+    assert service.submit_orders("p1", legacy_ventrue) is False
+    assert service.submit_orders("p2", v010_orders_for(state, "toreador")) is False
+    assert service.submit_orders("p3", v010_orders_for(state, "brujah")) is True
+    assert repo.get_game_info(DEFAULT_GAME_ID)["current_night"] == 2
+    assert repo.get_report(DEFAULT_GAME_ID, 1, "ventrue") is not None
+
+
 def test_v09_requires_a_decision_for_each_open_clan_request(tmp_path):
     service, repo = make_service(tmp_path)
     service.claim_clan("p1", "Alice", "ventrue")
@@ -204,6 +243,52 @@ def test_v09_requires_a_decision_for_each_open_clan_request(tmp_path):
     )
     with pytest.raises(ValueError, match="Every open political request"):
         service.submit_orders("p1", incomplete)
+
+
+def test_v010_primogen_cannot_administer_opposition_leader_personal_domain(tmp_path):
+    service, repo = make_service(tmp_path)
+    service.claim_clan("p1", "Alice", "ventrue")
+    state = repo.get_game_state(DEFAULT_GAME_ID)
+    base = v010_orders_for(state, "ventrue")
+    illegal = ClanNightOrders(
+        clan_id=base.clan_id,
+        actions=base.actions,
+        vote=base.vote,
+        request_decisions=base.request_decisions,
+        domain_decisions=(
+            DomainDecisionOrder(
+                decision=DomainDecisionType.GRANT_HUNTING_RIGHT,
+                domain_id="vieux_centre",
+                beneficiary_id="ventrue_helene",
+            ),
+        ),
+        version=4,
+    )
+    with pytest.raises(ValueError, match="personally hold"):
+        service.submit_orders("p1", illegal)
+
+
+def test_v010_allows_one_concession_on_primogen_personal_domain(tmp_path):
+    service, repo = make_service(tmp_path)
+    service.claim_clan("p1", "Alice", "ventrue")
+    state = repo.get_game_state(DEFAULT_GAME_ID)
+    base = v010_orders_for(state, "ventrue")
+    legal = ClanNightOrders(
+        clan_id=base.clan_id,
+        actions=base.actions,
+        vote=base.vote,
+        request_decisions=base.request_decisions,
+        domain_decisions=(
+            DomainDecisionOrder(
+                decision=DomainDecisionType.GRANT_HUNTING_RIGHT,
+                domain_id="quartier_affaires",
+                beneficiary_id="ventrue_victor",
+                duration_nights=3,
+            ),
+        ),
+        version=4,
+    )
+    service.validate_orders(state, "ventrue", legal)
 
 
 def test_reports_hide_other_clans_private_member_actions(tmp_path):

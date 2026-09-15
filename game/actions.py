@@ -2,6 +2,13 @@ from __future__ import annotations
 
 from .character_rules import attribute_value, has_expertise
 from .config import DEFAULT_RULES, GameRules
+from .domains import (
+    has_hunting_access,
+    intrusion_detected,
+    open_domain_dispute,
+    register_braconnage,
+    steward_domain,
+)
 from .factions import (
     effective_relation_to_primogen,
     ideology_relation_modifier,
@@ -17,7 +24,7 @@ from .models import (
     GameEvent,
     GameState,
 )
-from .social_politics import call_boon
+from .social_politics import add_grievance, call_boon
 
 
 ACTION_LABELS = {
@@ -29,6 +36,9 @@ ACTION_LABELS = {
     ActionType.POACH: "Débaucher vers l'opposition",
     ActionType.INVESTIGATE: "Enquêter",
     ActionType.CALL_BOON: "Réclamer une faveur",
+    ActionType.DOMAIN_STEWARD: "Administrer son Domaine",
+    ActionType.DOMAIN_INTRUSION: "Infiltrer un Domaine",
+    ActionType.BRACONNAGE: "Braconner sur un Domaine",
     ActionType.CONSOLIDATE: "Consolider le courant du Primogène (legacy)",
     ActionType.RALLY_OPPOSITION: "Rallier un courant rival (legacy)",
 }
@@ -85,6 +95,13 @@ def _resolve_target_character(state: GameState, action: GameAction) -> Character
     return target
 
 
+def _resolve_target_domain(state: GameState, action: GameAction):
+    domain = state.domains.get(action.target_domain_id or "")
+    if domain is None:
+        raise ValueError("This action requires a target domain")
+    return domain
+
+
 def _diplomacy_target(state: GameState, action: GameAction) -> Character:
     if action.target_character_id:
         target = _resolve_target_character(state, action)
@@ -138,7 +155,11 @@ def _opposition_accepts(state: GameState, action: GameAction, actor: Character) 
     side = clan_state.faction_memberships.get(actor.id, ClanFactionSide.PRIMOGEN)
     if side != ClanFactionSide.OPPOSITION:
         return True
-    if action.action_type in {ActionType.BUILD_INFLUENCE, ActionType.CALL_BOON}:
+    if action.action_type in {
+        ActionType.BUILD_INFLUENCE,
+        ActionType.CALL_BOON,
+        ActionType.DOMAIN_STEWARD,
+    }:
         return True
 
     relation = effective_relation_to_primogen(state, actor.id)
@@ -147,7 +168,7 @@ def _opposition_accepts(state: GameState, action: GameAction, actor: Character) 
     if relation <= 0:
         return False
 
-    if action.action_type == ActionType.INVESTIGATE:
+    if action.action_type in {ActionType.INVESTIGATE, ActionType.DOMAIN_INTRUSION}:
         return True
     if action.action_type == ActionType.DIPLOMACY:
         target = _diplomacy_target(state, action)
@@ -173,6 +194,14 @@ def _opposition_refusal_event(
     )
 
 
+def _detected_domain_audience(state: GameState, acting_clan_id: str, holder_id: str | None):
+    clans = {acting_clan_id}
+    holder = state.characters.get(holder_id or "")
+    if holder and holder.clan_id:
+        clans.add(holder.clan_id)
+    return tuple(sorted(clans))
+
+
 def apply_action(
     state: GameState,
     action: GameAction,
@@ -185,6 +214,7 @@ def apply_action(
     clan_state = state.clan_states[action.clan_id]
     clan = clan_state.clan
     actor = _resolve_actor(state, action)
+    audience_clan_ids: tuple[str, ...] | None = (action.clan_id,)
 
     if action.actor_character_id is not None and not _opposition_accepts(state, action, actor):
         return _opposition_refusal_event(state, action, actor, rules)
@@ -373,6 +403,115 @@ def apply_action(
             f"issue de : {boon.origin}."
         )
 
+    elif action.action_type == ActionType.DOMAIN_STEWARD:
+        domain = _resolve_target_domain(state, action)
+        if domain.holder_id != actor.id:
+            raise ValueError("A vampire may only administer their own Domain")
+        score = _political_score(
+            actor,
+            CharacterAttribute.MENTAL,
+            expertises=("Politique", "Finance", "Rue", "Investigation"),
+            backgrounds=("Contacts", "Ressources", "Alliés"),
+        ) + domain.servage
+        reduction = steward_domain(state, domain.id, actor.id, max(1, score // 3))
+        if reduction:
+            message = (
+                f"{actor.name} mobilise son Servage sur {domain.name} et réduit la pression "
+                f"territoriale de {reduction}."
+            )
+        else:
+            message = (
+                f"{actor.name} consolide son Servage sur {domain.name}; aucune pression immédiate "
+                "ne nécessite d'intervention."
+            )
+
+    elif action.action_type == ActionType.DOMAIN_INTRUSION:
+        domain = _resolve_target_domain(state, action)
+        if domain.holder_id == actor.id:
+            raise ValueError("A holder cannot infiltrate their own Domain")
+        score = _political_score(
+            actor,
+            CharacterAttribute.MENTAL,
+            expertises=("Investigation", "Subterfuge", "Technologie", "Rue"),
+            backgrounds=("Contacts", "Rue"),
+            disciplines=("auspex",),
+        )
+        detected = intrusion_detected(domain, score)
+        if not detected:
+            before = clan_state.known_domain_intel.get(domain.id, 0)
+            clan_state.known_domain_intel[domain.id] = min(rules.max_intel_level, before + 1)
+            message = (
+                f"{actor.name} infiltre discrètement {domain.name} et améliore le renseignement "
+                f"territorial : niveau {before} → {clan_state.known_domain_intel[domain.id]}."
+            )
+        else:
+            holder = state.characters.get(domain.holder_id or "")
+            if holder:
+                open_domain_dispute(
+                    state,
+                    domain_id=domain.id,
+                    claimant_id=holder.id,
+                    respondent_id=actor.id,
+                    reason=f"Intrusion détectée sur {domain.name}",
+                    severity=1,
+                )
+                add_grievance(
+                    state,
+                    owner_id=holder.id,
+                    target_id=actor.id,
+                    reason=f"Intrusion détectée sur le Domaine {domain.name}",
+                    severity=1,
+                )
+            audience_clan_ids = _detected_domain_audience(state, action.clan_id, domain.holder_id)
+            message = (
+                f"L'intrusion de {actor.name} sur {domain.name} est repérée par son Rempart. "
+                "Un litige territorial est ouvert."
+            )
+
+    elif action.action_type == ActionType.BRACONNAGE:
+        domain = _resolve_target_domain(state, action)
+        if has_hunting_access(state, actor.id, domain.id):
+            raise ValueError("A vampire with hunting access is not braconning")
+        score = _political_score(
+            actor,
+            CharacterAttribute.SOCIAL,
+            expertises=("Rue", "Subterfuge", "Intimidation"),
+            backgrounds=("Contacts", "Rue"),
+            disciplines=("presence", "celerite"),
+        )
+        success = score >= 2
+        detected = intrusion_detected(domain, score)
+        if success:
+            pressure_gain = register_braconnage(state, domain.id)
+            message = (
+                f"{actor.name} exploite clandestinement le Viandis de {domain.name} : "
+                f"pression +{pressure_gain}."
+            )
+        else:
+            message = f"{actor.name} tente de braconner sur {domain.name}, sans accès exploitable."
+        if detected:
+            holder = state.characters.get(domain.holder_id or "")
+            if holder:
+                open_domain_dispute(
+                    state,
+                    domain_id=domain.id,
+                    claimant_id=holder.id,
+                    respondent_id=actor.id,
+                    reason=f"Braconnage détecté sur {domain.name}",
+                    severity=2,
+                )
+                add_grievance(
+                    state,
+                    owner_id=holder.id,
+                    target_id=actor.id,
+                    reason=f"Braconnage sur le Domaine {domain.name}",
+                    severity=1,
+                )
+            audience_clan_ids = _detected_domain_audience(state, action.clan_id, domain.holder_id)
+            message += " Le Rempart du Domaine révèle l'intrusion et ouvre un litige territorial."
+        else:
+            message += " Le Rempart ne révèle pas l'auteur."
+
     elif action.action_type == ActionType.CONSOLIDATE:
         actor.personal_influence += rules.consolidate_influence_gain
         message = (
@@ -399,5 +538,5 @@ def apply_action(
         night=state.night,
         category="action",
         message=message,
-        audience_clan_ids=(action.clan_id,),
+        audience_clan_ids=audience_clan_ids,
     )

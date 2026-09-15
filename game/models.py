@@ -78,6 +78,23 @@ class BoonStatus(str, Enum):
     REFUSED = "refused"
 
 
+class HuntingRightStatus(str, Enum):
+    ACTIVE = "active"
+    REVOKED = "revoked"
+    EXPIRED = "expired"
+    CONTESTED = "contested"
+
+
+class DomainDisputeStatus(str, Enum):
+    OPEN = "open"
+    RESOLVED = "resolved"
+
+
+class DomainDecisionType(str, Enum):
+    GRANT_HUNTING_RIGHT = "grant_hunting_right"
+    REVOKE_HUNTING_RIGHT = "revoke_hunting_right"
+
+
 class PoliticalRequestType(str, Enum):
     EMBRACE_SUPPORT = "embrace_support"
     RESPONSIBILITY = "responsibility"
@@ -86,6 +103,7 @@ class PoliticalRequestType(str, Enum):
     BOON = "boon"
     MISSION = "mission"
     POLICY = "policy"
+    DOMAIN_ACCESS = "domain_access"
 
 
 class PoliticalRequestStatus(str, Enum):
@@ -120,6 +138,11 @@ CLAN_DISCIPLINES: dict[str, tuple[str, ...]] = {
 def _validate_zero_to_two(label: str, value: int) -> None:
     if not isinstance(value, int) or isinstance(value, bool) or not 0 <= value <= 2:
         raise ValueError(f"{label} must be an integer between 0 and 2")
+
+
+def _validate_zero_to_three(label: str, value: int) -> None:
+    if not isinstance(value, int) or isinstance(value, bool) or not 0 <= value <= 3:
+        raise ValueError(f"{label} must be an integer between 0 and 3")
 
 
 @dataclass
@@ -290,6 +313,7 @@ class ClanPoliticalState:
     opposition_leader_id: Optional[str] = None
     opposition_allied_primogen_id: Optional[str] = None
     known_character_intel: dict[str, int] = field(default_factory=dict)
+    known_domain_intel: dict[str, int] = field(default_factory=dict)
     relations: dict[str, float] = field(default_factory=dict)
     # Legacy V0.7 fields kept only so old states can be deserialized safely.
     current_loyalties: dict[str, float] = field(default_factory=dict)
@@ -329,6 +353,63 @@ class Boon:
     public: bool = False
     called_night: Optional[int] = None
     resolved_night: Optional[int] = None
+
+
+@dataclass
+class Domain:
+    id: str
+    name: str
+    description: str
+    holder_id: Optional[str]
+    grantor_id: Optional[str]
+    viandis: int
+    servage: int
+    rempart: int
+    pressure: int = 0
+    masquerade_risk: int = 0
+
+    def __post_init__(self) -> None:
+        for label, value in (
+            ("Viandis", self.viandis),
+            ("Servage", self.servage),
+            ("Rempart", self.rempart),
+            ("Masquerade risk", self.masquerade_risk),
+        ):
+            _validate_zero_to_three(label, value)
+        if not isinstance(self.pressure, int) or isinstance(self.pressure, bool) or self.pressure < 0:
+            raise ValueError("Domain pressure must be a non-negative integer")
+
+
+@dataclass
+class HuntingRight:
+    id: str
+    domain_id: str
+    beneficiary_id: str
+    granted_by_id: str
+    created_night: int
+    expires_night: Optional[int] = None
+    conditions: str = ""
+    status: HuntingRightStatus = HuntingRightStatus.ACTIVE
+    boon_id: Optional[str] = None
+    resolved_night: Optional[int] = None
+
+
+@dataclass
+class DomainDispute:
+    id: str
+    domain_id: str
+    claimant_id: str
+    respondent_id: str
+    reason: str
+    created_night: int
+    severity: int = 1
+    status: DomainDisputeStatus = DomainDisputeStatus.OPEN
+    public: bool = False
+    resolved_night: Optional[int] = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.severity, int) or isinstance(self.severity, bool) or not 1 <= self.severity <= 3:
+            raise ValueError("Domain dispute severity must be between 1 and 3")
 
 
 @dataclass
@@ -411,6 +492,9 @@ class GameState:
     clan_states: dict[str, ClanPoliticalState] = field(default_factory=dict)
     embrace_requests: dict[str, EmbraceRequest] = field(default_factory=dict)
     boons: dict[str, Boon] = field(default_factory=dict)
+    domains: dict[str, Domain] = field(default_factory=dict)
+    hunting_rights: dict[str, HuntingRight] = field(default_factory=dict)
+    domain_disputes: dict[str, DomainDispute] = field(default_factory=dict)
     grievances: dict[str, Grievance] = field(default_factory=dict)
     political_requests: dict[str, PoliticalRequest] = field(default_factory=dict)
     promises: dict[str, PoliticalPromise] = field(default_factory=dict)
@@ -426,6 +510,9 @@ class ActionType(str, Enum):
     POACH = "poach"
     INVESTIGATE = "investigate"
     CALL_BOON = "call_boon"
+    DOMAIN_STEWARD = "domain_steward"
+    DOMAIN_INTRUSION = "domain_intrusion"
+    BRACONNAGE = "braconnage"
     # Legacy order values accepted for already-submitted V0.7 nights.
     CONSOLIDATE = "consolidate"
     RALLY_OPPOSITION = "rally_opposition"
@@ -440,6 +527,7 @@ class GameAction:
     target_current_id: Optional[str] = None
     actor_character_id: Optional[str] = None
     target_character_id: Optional[str] = None
+    target_domain_id: Optional[str] = None
 
 
 class NightStatus(str, Enum):
@@ -462,12 +550,24 @@ class PoliticalRequestDecisionOrder:
 
 
 @dataclass(frozen=True)
+class DomainDecisionOrder:
+    decision: DomainDecisionType
+    domain_id: str
+    beneficiary_id: Optional[str] = None
+    right_id: Optional[str] = None
+    duration_nights: int = 3
+    boon_level: Optional[BoonLevel] = None
+
+
+@dataclass(frozen=True)
 class ClanNightOrders:
     clan_id: str
     actions: tuple[GameAction, ...]
     vote: PrimogenVote | None = None
     embrace_petitions: tuple[EmbracePetitionOrder, ...] = ()
     request_decisions: tuple[PoliticalRequestDecisionOrder, ...] = ()
+    domain_decisions: tuple[DomainDecisionOrder, ...] = ()
+    promise_fulfillments: tuple[str, ...] = ()
     version: int = 1
 
 

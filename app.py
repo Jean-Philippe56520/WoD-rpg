@@ -11,6 +11,7 @@ from game.auth import (
     AuthSession,
     SupabaseAuthClient,
 )
+from game.domains import active_hunting_rights, has_hunting_access, initialize_domains
 from game.factions import (
     clan_total_influence,
     effective_relation_to_primogen,
@@ -20,15 +21,21 @@ from game.factions import (
 )
 from game.models import (
     ActionType,
+    BoonLevel,
     BoonStatus,
     ClanFactionSide,
     ClanNightOrders,
+    DomainDecisionOrder,
+    DomainDecisionType,
+    DomainDisputeStatus,
     EmbracePetitionOrder,
     GameAction,
+    HuntingRightStatus,
     NightStatus,
     PoliticalRequestDecisionOrder,
     PoliticalRequestStatus,
     PrimogenVote,
+    PromiseStatus,
     RequestDecision,
 )
 from game.multiplayer import DEFAULT_GAME_ID, MultiplayerGameService
@@ -39,7 +46,7 @@ from game.world import candidates_from_state
 
 st.set_page_config(page_title="WoD RPG - Chronique politique", page_icon="🩸", layout="wide")
 st.title("WoD RPG - Chronique politique")
-st.caption("V0.9 - factions, Prestation, requêtes, griefs et autonomie politique")
+st.caption("V0.10 - Domaines, Viandis, Servage, Rempart et politique territoriale")
 
 AUTH_SESSION_KEY = "wod_auth_session"
 LOCAL_PLAYER_KEY = "wod_local_player_id"
@@ -81,16 +88,16 @@ REQUEST_DECISION_LABELS = {
     RequestDecision.PROMISE: "Promettre",
 }
 
-V09_ACTIONS = (
-    ActionType.BUILD_INFLUENCE,
-    ActionType.DIPLOMACY,
-    ActionType.CONSOLIDATE_RELATION,
-    ActionType.RECRUIT,
-    ActionType.UNDERMINE,
-    ActionType.POACH,
-    ActionType.INVESTIGATE,
-    ActionType.CALL_BOON,
-)
+DOMAIN_DECISION_LABELS = {
+    DomainDecisionType.GRANT_HUNTING_RIGHT: "Accorder un droit de chasse",
+    DomainDecisionType.REVOKE_HUNTING_RIGHT: "Révoquer un droit de chasse",
+}
+
+BOON_LEVEL_LABELS = {
+    BoonLevel.MINOR: "Faveur mineure",
+    BoonLevel.MAJOR: "Faveur majeure",
+    BoonLevel.LIFE: "Dette de vie",
+}
 
 
 @st.cache_resource
@@ -158,36 +165,6 @@ def render_authentication(auth: SupabaseAuthClient) -> None:
     st.stop()
 
 
-def describe_orders(orders: ClanNightOrders, state) -> list[str]:
-    lines: list[str] = []
-    for decision in orders.request_decisions:
-        request = state.political_requests.get(decision.request_id)
-        if request:
-            requester = state.characters[request.requester_id]
-            lines.append(
-                f"Requête de {requester.name} : {REQUEST_DECISION_LABELS[decision.decision]}"
-            )
-    for index, action in enumerate(orders.actions, start=1):
-        actor_id = action.actor_character_id or state.clan_states[orders.clan_id].clan.primogen_id
-        actor = state.characters.get(actor_id)
-        text = f"Action {index} : {actor.name if actor else actor_id} — {ACTION_LABELS[action.action_type]}"
-        if action.target_character_id:
-            target = state.characters.get(action.target_character_id)
-            text += f" → {target.name if target else action.target_character_id}"
-        elif action.target_clan_id:
-            text += f" → {state.clan_states[action.target_clan_id].clan.name}"
-        lines.append(text)
-    if orders.vote:
-        candidate = state.characters.get(orders.vote.candidate_id)
-        lines.append(f"Reconnaissance de Praxis : {candidate.name if candidate else orders.vote.candidate_id}")
-    for petition in orders.embrace_petitions:
-        member = state.characters[petition.member_id]
-        lines.append(
-            f"Demande d'Étreinte : {member.name} souhaite Étreindre {petition.proposed_childe_name}"
-        )
-    return lines
-
-
 def format_score_map(values: dict[str, int], labels: dict[str, str] | None = None) -> str:
     labels = labels or {}
     if not values:
@@ -220,6 +197,73 @@ def political_profile(character) -> str:
         f"{MORTAL_STANCE_LABELS[character.mortal_stance.value]} · "
         f"{ORDER_STANCE_LABELS[character.order_stance.value]}"
     )
+
+
+def holder_label(state, domain) -> str:
+    if not domain.holder_id:
+        return "Non attribué"
+    holder = state.characters.get(domain.holder_id)
+    if not holder:
+        return domain.holder_id
+    clan_name = state.clan_states[holder.clan_id].clan.name if holder.clan_id else "Sans clan"
+    return f"{holder.name} — {clan_name}"
+
+
+def describe_orders(orders: ClanNightOrders, state) -> list[str]:
+    lines: list[str] = []
+    for decision in orders.request_decisions:
+        request = state.political_requests.get(decision.request_id)
+        if request:
+            requester = state.characters[request.requester_id]
+            lines.append(
+                f"Requête de {requester.name} : {REQUEST_DECISION_LABELS[decision.decision]}"
+            )
+    for promise_id in orders.promise_fulfillments:
+        promise = state.promises.get(promise_id)
+        if promise:
+            beneficiary = state.characters[promise.beneficiary_id]
+            lines.append(f"Promesse honorée envers {beneficiary.name}")
+    for item in orders.domain_decisions:
+        domain = state.domains.get(item.domain_id)
+        domain_name = domain.name if domain else item.domain_id
+        if item.decision == DomainDecisionType.GRANT_HUNTING_RIGHT:
+            beneficiary = state.characters.get(item.beneficiary_id or "")
+            text = (
+                f"Domaine : droit de chasse sur {domain_name} accordé à "
+                f"{beneficiary.name if beneficiary else item.beneficiary_id} pour {item.duration_nights} nuits"
+            )
+            if item.boon_level:
+                text += f" contre {BOON_LEVEL_LABELS[item.boon_level].lower()}"
+            lines.append(text)
+        else:
+            right = state.hunting_rights.get(item.right_id or "")
+            beneficiary = state.characters.get(right.beneficiary_id) if right else None
+            lines.append(
+                f"Domaine : droit de chasse sur {domain_name} révoqué"
+                + (f" pour {beneficiary.name}" if beneficiary else "")
+            )
+    for index, action in enumerate(orders.actions, start=1):
+        actor_id = action.actor_character_id or state.clan_states[orders.clan_id].clan.primogen_id
+        actor = state.characters.get(actor_id)
+        text = f"Action {index} : {actor.name if actor else actor_id} — {ACTION_LABELS[action.action_type]}"
+        if action.target_character_id:
+            target = state.characters.get(action.target_character_id)
+            text += f" → {target.name if target else action.target_character_id}"
+        elif action.target_domain_id:
+            domain = state.domains.get(action.target_domain_id)
+            text += f" → {domain.name if domain else action.target_domain_id}"
+        elif action.target_clan_id:
+            text += f" → {state.clan_states[action.target_clan_id].clan.name}"
+        lines.append(text)
+    if orders.vote:
+        candidate = state.characters.get(orders.vote.candidate_id)
+        lines.append(f"Reconnaissance de Praxis : {candidate.name if candidate else orders.vote.candidate_id}")
+    for petition in orders.embrace_petitions:
+        member = state.characters[petition.member_id]
+        lines.append(
+            f"Demande d'Étreinte : {member.name} souhaite Étreindre {petition.proposed_childe_name}"
+        )
+    return lines
 
 
 try:
@@ -270,6 +314,7 @@ else:
 try:
     state = repo.get_game_state(DEFAULT_GAME_ID)
     initialize_factions(state)
+    initialize_domains(state)
     game_info = repo.get_game_info(DEFAULT_GAME_ID)
     assignments = repo.list_assignments(DEFAULT_GAME_ID)
     player_clan = repo.get_player_clan(DEFAULT_GAME_ID, player_id)
@@ -344,8 +389,8 @@ for col, clan_id in zip(status_cols, game_info["required_clans"]):
     col.metric(clan_names[clan_id], label)
     col.caption(controller)
 
-night_tab, clan_tab, prestation_tab, city_tab, elysium_tab, reports_tab = st.tabs(
-    ["Ma nuit", "Mon clan", "Prestation", "Ville", "Elysium", "Mes rapports"]
+night_tab, clan_tab, domains_tab, prestation_tab, city_tab, elysium_tab, reports_tab = st.tabs(
+    ["Ma nuit", "Mon clan", "Domaines", "Prestation", "Ville", "Elysium", "Mes rapports"]
 )
 
 with night_tab:
@@ -396,6 +441,20 @@ with night_tab:
             ],
             key=lambda request: (request.created_night, request.id),
         )
+        pending_promises = sorted(
+            [
+                promise
+                for promise in state.promises.values()
+                if promise.promisor_id == own_primogen.id
+                and promise.status == PromiseStatus.PENDING
+                and state.night <= promise.due_night
+            ],
+            key=lambda promise: (promise.due_night, promise.id),
+        )
+        primogen_domains = sorted(
+            [domain for domain in state.domains.values() if domain.holder_id == own_primogen.id],
+            key=lambda domain: domain.name,
+        )
 
         with st.form("night_orders"):
             request_decisions: list[PoliticalRequestDecisionOrder] = []
@@ -415,7 +474,7 @@ with night_tab:
                         )
                         if request.offered_boon_level:
                             st.caption(
-                                f"Contrepartie proposée : faveur {request.offered_boon_level.value}."
+                                f"Contrepartie proposée : {BOON_LEVEL_LABELS[request.offered_boon_level].lower()}."
                             )
                         decision = st.selectbox(
                             "Réponse",
@@ -426,6 +485,119 @@ with night_tab:
                         request_decisions.append(
                             PoliticalRequestDecisionOrder(request.id, decision)
                         )
+
+            promise_fulfillments: list[str] = []
+            if pending_promises:
+                st.markdown("#### Promesses à honorer")
+                st.caption(
+                    "Honorer une promesse intervient avant les missions. Une promesse territoriale peut donc "
+                    "ouvrir immédiatement un droit de chasse cette nuit."
+                )
+                for promise in pending_promises:
+                    beneficiary = state.characters[promise.beneficiary_id]
+                    if st.checkbox(
+                        f"Honorer la promesse faite à {beneficiary.name} — échéance nuit {promise.due_night}",
+                        key=f"fulfill_promise_{promise.id}_{state.night}",
+                    ):
+                        promise_fulfillments.append(promise.id)
+                    st.caption(promise.description)
+
+            domain_decisions: list[DomainDecisionOrder] = []
+            if primogen_domains:
+                st.markdown("#### Administration territoriale du Primogène")
+                st.caption(
+                    "Le Primogène ne peut administrer ici que les Domaines qu'il détient personnellement. "
+                    "Les Domaines de l'opposition restent hors de son contrôle direct."
+                )
+                domain_decision = st.selectbox(
+                    "Décision territoriale",
+                    options=[None, *list(DomainDecisionType)],
+                    format_func=lambda item: "Aucune" if item is None else DOMAIN_DECISION_LABELS[item],
+                    key=f"domain_decision_{state.night}",
+                )
+                if domain_decision is not None:
+                    domain_id = st.selectbox(
+                        "Domaine concerné",
+                        options=[domain.id for domain in primogen_domains],
+                        format_func=lambda did: state.domains[did].name,
+                        key=f"domain_decision_target_{state.night}",
+                    )
+                    if domain_decision == DomainDecisionType.GRANT_HUNTING_RIGHT:
+                        visible_foreign = list(
+                            dict.fromkeys(
+                                foreign_primogens(state, player_clan)
+                                + known_foreign_members(state, player_clan, 1)
+                            )
+                        )
+                        beneficiary_ids = [
+                            member.id
+                            for member in active_members
+                            if member.id != own_primogen.id
+                            and not has_hunting_access(state, member.id, domain_id)
+                        ]
+                        beneficiary_ids.extend(
+                            character_id
+                            for character_id in visible_foreign
+                            if character_id in state.characters
+                            and character_id != state.prince_id
+                            and not has_hunting_access(state, character_id, domain_id)
+                        )
+                        beneficiary_ids = list(dict.fromkeys(beneficiary_ids))
+                        if beneficiary_ids:
+                            beneficiary_id = st.selectbox(
+                                "Bénéficiaire",
+                                options=beneficiary_ids,
+                                format_func=lambda cid: state.characters[cid].name,
+                                key=f"domain_beneficiary_{state.night}",
+                            )
+                            duration_nights = int(
+                                st.number_input(
+                                    "Durée du droit de chasse (nuits)",
+                                    min_value=1,
+                                    max_value=10,
+                                    value=3,
+                                    step=1,
+                                    key=f"domain_duration_{state.night}",
+                                )
+                            )
+                            boon_level = st.selectbox(
+                                "Contrepartie de Prestation",
+                                options=[None, *list(BoonLevel)],
+                                format_func=lambda level: "Aucune" if level is None else BOON_LEVEL_LABELS[level],
+                                key=f"domain_boon_{state.night}",
+                            )
+                            domain_decisions.append(
+                                DomainDecisionOrder(
+                                    decision=domain_decision,
+                                    domain_id=domain_id,
+                                    beneficiary_id=beneficiary_id,
+                                    duration_nights=duration_nights,
+                                    boon_level=boon_level,
+                                )
+                            )
+                        else:
+                            st.caption("Aucun bénéficiaire visible ne peut recevoir un nouveau droit sur ce Domaine.")
+                    else:
+                        rights = active_hunting_rights(state, domain_id=domain_id)
+                        if rights:
+                            right_id = st.selectbox(
+                                "Droit à révoquer",
+                                options=[right.id for right in rights],
+                                format_func=lambda rid: (
+                                    f"{state.characters[state.hunting_rights[rid].beneficiary_id].name} — "
+                                    f"échéance nuit {state.hunting_rights[rid].expires_night}"
+                                ),
+                                key=f"domain_revoke_{state.night}",
+                            )
+                            domain_decisions.append(
+                                DomainDecisionOrder(
+                                    decision=domain_decision,
+                                    domain_id=domain_id,
+                                    right_id=right_id,
+                                )
+                            )
+                        else:
+                            st.caption("Aucun droit de chasse actif n'est révocable sur ce Domaine.")
 
             st.markdown("#### Une action par vampire")
             st.caption(
@@ -479,6 +651,17 @@ with night_tab:
                             if boon.creditor_id == actor.id and boon.status == BoonStatus.DUE
                         }
                     )
+                    actor_domains = [
+                        domain.id for domain in state.domains.values() if domain.holder_id == actor.id
+                    ]
+                    intrusion_domains = [
+                        domain.id for domain in state.domains.values() if domain.holder_id != actor.id
+                    ]
+                    braconnage_domains = [
+                        domain.id
+                        for domain in state.domains.values()
+                        if not has_hunting_access(state, actor.id, domain.id)
+                    ]
 
                     options = [ActionType.BUILD_INFLUENCE, ActionType.DIPLOMACY, ActionType.INVESTIGATE]
                     if own_targets:
@@ -491,6 +674,12 @@ with night_tab:
                         options.append(ActionType.POACH)
                     if boon_targets:
                         options.append(ActionType.CALL_BOON)
+                    if actor_domains:
+                        options.append(ActionType.DOMAIN_STEWARD)
+                    if intrusion_domains:
+                        options.append(ActionType.DOMAIN_INTRUSION)
+                    if braconnage_domains:
+                        options.append(ActionType.BRACONNAGE)
 
                     action_type = st.selectbox(
                         "Action",
@@ -500,6 +689,7 @@ with night_tab:
                     )
                     target_character_id = None
                     target_clan_id = None
+                    target_domain_id = None
 
                     if action_type == ActionType.DIPLOMACY:
                         target_ids = list(dict.fromkeys(foreign_primogens(state, player_clan) + known_foreign))
@@ -559,6 +749,27 @@ with night_tab:
                             format_func=lambda cid: state.characters[cid].name,
                             key=f"target_boon_{state.night}_{actor.id}",
                         )
+                    elif action_type == ActionType.DOMAIN_STEWARD:
+                        target_domain_id = st.selectbox(
+                            "Domaine à administrer",
+                            options=actor_domains,
+                            format_func=lambda did: state.domains[did].name,
+                            key=f"target_domain_steward_{state.night}_{actor.id}",
+                        )
+                    elif action_type == ActionType.DOMAIN_INTRUSION:
+                        target_domain_id = st.selectbox(
+                            "Domaine à infiltrer",
+                            options=intrusion_domains,
+                            format_func=lambda did: f"{state.domains[did].name} — {holder_label(state, state.domains[did])}",
+                            key=f"target_domain_intrusion_{state.night}_{actor.id}",
+                        )
+                    elif action_type == ActionType.BRACONNAGE:
+                        target_domain_id = st.selectbox(
+                            "Domaine à braconner",
+                            options=braconnage_domains,
+                            format_func=lambda did: f"{state.domains[did].name} — {holder_label(state, state.domains[did])}",
+                            key=f"target_braconnage_{state.night}_{actor.id}",
+                        )
 
                     actions.append(
                         GameAction(
@@ -567,6 +778,7 @@ with night_tab:
                             target_clan_id=target_clan_id,
                             actor_character_id=actor.id,
                             target_character_id=target_character_id,
+                            target_domain_id=target_domain_id,
                         )
                     )
 
@@ -620,7 +832,9 @@ with night_tab:
                         vote=vote,
                         embrace_petitions=tuple(petitions),
                         request_decisions=tuple(request_decisions),
-                        version=3,
+                        domain_decisions=tuple(domain_decisions),
+                        promise_fulfillments=tuple(promise_fulfillments),
+                        version=4,
                     )
                     resolved = service.submit_orders(player_id, orders)
                     if resolved:
@@ -723,6 +937,84 @@ with clan_tab:
             f"· {promise.status.value} · échéance nuit {promise.due_night} — {promise.description}"
         )
 
+with domains_tab:
+    st.subheader("Domaines et droits de chasse")
+    st.caption(
+        "Le détenteur officiel d'un Domaine est public. Viandis, Servage, Rempart, pression réelle, "
+        "droits privés et litiges dépendent de votre implication ou de votre renseignement."
+    )
+
+    for domain in sorted(state.domains.values(), key=lambda item: item.name):
+        holder = state.characters.get(domain.holder_id or "")
+        holder_clan = holder.clan_id if holder else None
+        own_involvement = holder_clan == player_clan
+        intel_level = own_clan_state.known_domain_intel.get(domain.id, 0)
+        with st.expander(f"{domain.name} — {holder_label(state, domain)}"):
+            st.write(domain.description)
+            if own_involvement or intel_level >= 2:
+                viandis_col, servage_col, rempart_col, pressure_col = st.columns(4)
+                viandis_col.metric("Viandis", f"{domain.viandis}/3")
+                servage_col.metric("Servage", f"{domain.servage}/3")
+                rempart_col.metric("Rempart", f"{domain.rempart}/3")
+                pressure_col.metric("Pression", domain.pressure)
+                if not own_involvement:
+                    st.caption("Ces informations détaillées proviennent du renseignement territorial de votre clan.")
+            elif intel_level == 1:
+                st.caption("Votre clan dispose d'indices partiels sur l'organisation de ce Domaine.")
+            else:
+                st.caption("Les caractéristiques internes de ce Domaine ne sont pas connues de votre clan.")
+
+            visible_rights = [
+                right
+                for right in active_hunting_rights(state, domain_id=domain.id)
+                if own_involvement
+                or state.characters[right.beneficiary_id].clan_id == player_clan
+                or state.characters[right.granted_by_id].clan_id == player_clan
+            ]
+            if visible_rights:
+                st.markdown("**Droits de chasse connus**")
+                for right in visible_rights:
+                    beneficiary = state.characters[right.beneficiary_id]
+                    grantor = state.characters[right.granted_by_id]
+                    st.write(
+                        f"- {beneficiary.name} · accordé par {grantor.name} · échéance nuit {right.expires_night}"
+                    )
+
+    st.markdown("### Droits détenus par votre clan")
+    own_rights = [
+        right
+        for right in state.hunting_rights.values()
+        if right.status == HuntingRightStatus.ACTIVE
+        and state.characters[right.beneficiary_id].clan_id == player_clan
+    ]
+    if not own_rights:
+        st.caption("Aucun membre de votre clan ne dispose actuellement d'un droit de chasse concédé.")
+    for right in own_rights:
+        beneficiary = state.characters[right.beneficiary_id]
+        domain = state.domains[right.domain_id]
+        st.write(
+            f"**{beneficiary.name}** → {domain.name} · échéance nuit {right.expires_night}"
+            + (f" · {right.conditions}" if right.conditions else "")
+        )
+
+    st.markdown("### Litiges territoriaux connus")
+    visible_disputes = []
+    for dispute in state.domain_disputes.values():
+        if dispute.status != DomainDisputeStatus.OPEN:
+            continue
+        claimant = state.characters[dispute.claimant_id]
+        respondent = state.characters[dispute.respondent_id]
+        if dispute.public or claimant.clan_id == player_clan or respondent.clan_id == player_clan:
+            visible_disputes.append(dispute)
+    if not visible_disputes:
+        st.caption("Aucun litige territorial connu de votre clan.")
+    for dispute in visible_disputes:
+        st.write(
+            f"**{state.domains[dispute.domain_id].name}** · "
+            f"{state.characters[dispute.claimant_id].name} ↔ {state.characters[dispute.respondent_id].name} "
+            f"· gravité {dispute.severity}/3 — {dispute.reason}"
+        )
+
 with prestation_tab:
     st.subheader("Prestation — faveurs et dettes")
     st.caption(
@@ -742,7 +1034,7 @@ with prestation_tab:
         debtor = state.characters[boon.debtor_id]
         with st.container(border=True):
             st.write(
-                f"**{creditor.name} ← {debtor.name}** · faveur {boon.level.value} · {boon.status.value}"
+                f"**{creditor.name} ← {debtor.name}** · {BOON_LEVEL_LABELS[boon.level]} · {boon.status.value}"
             )
             st.caption(f"Origine : {boon.origin} · créée nuit {boon.created_night}")
 
@@ -760,7 +1052,11 @@ with city_tab:
             f"Statut {primogen.status}/5"
         )
 
-    st.markdown("#### Renseignements de votre clan")
+    st.markdown("#### Détenteurs officiels des Domaines")
+    for domain in sorted(state.domains.values(), key=lambda item: item.name):
+        st.write(f"**{domain.name}** : {holder_label(state, domain)}")
+
+    st.markdown("#### Renseignements sur les vampires")
     known = sorted(
         own_clan_state.known_character_intel.items(),
         key=lambda item: (state.characters[item[0]].clan_id, state.characters[item[0]].name),
@@ -781,8 +1077,8 @@ with city_tab:
                 f"{effective_relation_to_primogen(state, character.id):+d} · influence {character.personal_influence:.0f}"
             )
     st.caption(
-        "Les autres membres, relations, griefs, ambitions, factions et ordres restent privés tant qu'ils "
-        "ne sont pas découverts."
+        "Les relations, griefs, ambitions, droits privés, pression territoriale et ordres restent cachés "
+        "tant qu'ils ne sont pas découverts."
     )
 
 with elysium_tab:
@@ -815,6 +1111,6 @@ with reports_tab:
                 st.write(f"- {item}")
 
 st.caption(
-    "V0.9 : factions internes, rapport aux mortels / à l'ordre, Humanité séparée, Statut, Prestation, "
-    "griefs, requêtes au Primogène et réactions autonomes explicables."
+    "V0.10 : Domaines personnels, Viandis, Servage, Rempart, droits de chasse, Prestation, "
+    "pression territoriale, intrusion, braconnage et conséquences persistantes."
 )

@@ -16,6 +16,11 @@ from .models import (
     ClanNightOrders,
     ClanNightReport,
     ClanPoliticalState,
+    Domain,
+    DomainDecisionOrder,
+    DomainDecisionType,
+    DomainDispute,
+    DomainDisputeStatus,
     EmbracePetitionOrder,
     EmbraceRequest,
     EmbraceStatus,
@@ -23,6 +28,8 @@ from .models import (
     GameEvent,
     GameState,
     Grievance,
+    HuntingRight,
+    HuntingRightStatus,
     MortalStance,
     OrderStance,
     PoliticalAmbition,
@@ -177,6 +184,7 @@ def game_state_to_dict(state: GameState) -> dict:
                 "opposition_leader_id": value.opposition_leader_id,
                 "opposition_allied_primogen_id": value.opposition_allied_primogen_id,
                 "known_character_intel": value.known_character_intel,
+                "known_domain_intel": value.known_domain_intel,
                 "relations": value.relations,
                 "current_loyalties": value.current_loyalties,
                 "current_allies": value.current_allies,
@@ -211,6 +219,51 @@ def game_state_to_dict(state: GameState) -> dict:
                 "resolved_night": value.resolved_night,
             }
             for key, value in state.boons.items()
+        },
+        "domains": {
+            key: {
+                "id": value.id,
+                "name": value.name,
+                "description": value.description,
+                "holder_id": value.holder_id,
+                "grantor_id": value.grantor_id,
+                "viandis": value.viandis,
+                "servage": value.servage,
+                "rempart": value.rempart,
+                "pressure": value.pressure,
+                "masquerade_risk": value.masquerade_risk,
+            }
+            for key, value in state.domains.items()
+        },
+        "hunting_rights": {
+            key: {
+                "id": value.id,
+                "domain_id": value.domain_id,
+                "beneficiary_id": value.beneficiary_id,
+                "granted_by_id": value.granted_by_id,
+                "created_night": value.created_night,
+                "expires_night": value.expires_night,
+                "conditions": value.conditions,
+                "status": value.status.value,
+                "boon_id": value.boon_id,
+                "resolved_night": value.resolved_night,
+            }
+            for key, value in state.hunting_rights.items()
+        },
+        "domain_disputes": {
+            key: {
+                "id": value.id,
+                "domain_id": value.domain_id,
+                "claimant_id": value.claimant_id,
+                "respondent_id": value.respondent_id,
+                "reason": value.reason,
+                "created_night": value.created_night,
+                "severity": value.severity,
+                "status": value.status.value,
+                "public": value.public,
+                "resolved_night": value.resolved_night,
+            }
+            for key, value in state.domain_disputes.items()
         },
         "grievances": {key: asdict(value) for key, value in state.grievances.items()},
         "political_requests": {
@@ -295,6 +348,9 @@ def game_state_from_dict(data: dict) -> GameState:
             known_character_intel={
                 k: int(v) for k, v in value.get("known_character_intel", {}).items()
             },
+            known_domain_intel={
+                k: int(v) for k, v in value.get("known_domain_intel", {}).items()
+            },
             relations={k: float(v) for k, v in value.get("relations", {}).items()},
             current_loyalties={
                 k: float(v) for k, v in value.get("current_loyalties", {}).items()
@@ -330,6 +386,51 @@ def game_state_from_dict(data: dict) -> GameState:
             resolved_night=value.get("resolved_night"),
         )
         for key, value in data.get("boons", {}).items()
+    }
+    domains = {
+        key: Domain(
+            id=value["id"],
+            name=value["name"],
+            description=value.get("description", ""),
+            holder_id=value.get("holder_id"),
+            grantor_id=value.get("grantor_id"),
+            viandis=int(value.get("viandis", 1)),
+            servage=int(value.get("servage", 1)),
+            rempart=int(value.get("rempart", 1)),
+            pressure=int(value.get("pressure", 0)),
+            masquerade_risk=int(value.get("masquerade_risk", 0)),
+        )
+        for key, value in data.get("domains", {}).items()
+    }
+    hunting_rights = {
+        key: HuntingRight(
+            id=value["id"],
+            domain_id=value["domain_id"],
+            beneficiary_id=value["beneficiary_id"],
+            granted_by_id=value["granted_by_id"],
+            created_night=int(value["created_night"]),
+            expires_night=value.get("expires_night"),
+            conditions=value.get("conditions", ""),
+            status=HuntingRightStatus(value.get("status", HuntingRightStatus.ACTIVE.value)),
+            boon_id=value.get("boon_id"),
+            resolved_night=value.get("resolved_night"),
+        )
+        for key, value in data.get("hunting_rights", {}).items()
+    }
+    domain_disputes = {
+        key: DomainDispute(
+            id=value["id"],
+            domain_id=value["domain_id"],
+            claimant_id=value["claimant_id"],
+            respondent_id=value["respondent_id"],
+            reason=value.get("reason", "Litige territorial"),
+            created_night=int(value["created_night"]),
+            severity=int(value.get("severity", 1)),
+            status=DomainDisputeStatus(value.get("status", DomainDisputeStatus.OPEN.value)),
+            public=bool(value.get("public", False)),
+            resolved_night=value.get("resolved_night"),
+        )
+        for key, value in data.get("domain_disputes", {}).items()
     }
     grievances = {
         key: Grievance(
@@ -401,15 +502,20 @@ def game_state_from_dict(data: dict) -> GameState:
         clan_states=clan_states,
         embrace_requests=embrace_requests,
         boons=boons,
+        domains=domains,
+        hunting_rights=hunting_rights,
+        domain_disputes=domain_disputes,
         grievances=grievances,
         political_requests=political_requests,
         promises=promises,
         events=events,
     )
+    from .domains import initialize_domains
     from .factions import initialize_factions
     from .social_politics import generate_requests_for_night
 
     initialize_factions(state)
+    initialize_domains(state)
     generate_requests_for_night(state)
     return state
 
@@ -432,6 +538,7 @@ def clan_orders_to_dict(orders: ClanNightOrders) -> dict:
                 "action_type": action.action_type.value,
                 "actor_character_id": action.actor_character_id,
                 "target_character_id": action.target_character_id,
+                "target_domain_id": action.target_domain_id,
                 "target_clan_id": action.target_clan_id,
                 "target_current_id": action.target_current_id,
             }
@@ -450,6 +557,18 @@ def clan_orders_to_dict(orders: ClanNightOrders) -> dict:
             {"request_id": item.request_id, "decision": item.decision.value}
             for item in orders.request_decisions
         ],
+        "domain_decisions": [
+            {
+                "decision": item.decision.value,
+                "domain_id": item.domain_id,
+                "beneficiary_id": item.beneficiary_id,
+                "right_id": item.right_id,
+                "duration_nights": item.duration_nights,
+                "boon_level": item.boon_level.value if item.boon_level else None,
+            }
+            for item in orders.domain_decisions
+        ],
+        "promise_fulfillments": list(orders.promise_fulfillments),
     }
 
 
@@ -462,6 +581,7 @@ def clan_orders_from_dict(data: dict) -> ClanNightOrders:
                 action_type=ActionType(action["action_type"]),
                 actor_character_id=action.get("actor_character_id"),
                 target_character_id=action.get("target_character_id"),
+                target_domain_id=action.get("target_domain_id"),
                 target_clan_id=action.get("target_clan_id"),
                 target_current_id=action.get("target_current_id"),
             )
@@ -486,6 +606,18 @@ def clan_orders_from_dict(data: dict) -> ClanNightOrders:
             )
             for item in data.get("request_decisions", [])
         ),
+        domain_decisions=tuple(
+            DomainDecisionOrder(
+                decision=DomainDecisionType(item["decision"]),
+                domain_id=item["domain_id"],
+                beneficiary_id=item.get("beneficiary_id"),
+                right_id=item.get("right_id"),
+                duration_nights=int(item.get("duration_nights", 3)),
+                boon_level=(BoonLevel(item["boon_level"]) if item.get("boon_level") else None),
+            )
+            for item in data.get("domain_decisions", [])
+        ),
+        promise_fulfillments=tuple(data.get("promise_fulfillments", [])),
         version=int(data.get("version", 1)),
     )
 
