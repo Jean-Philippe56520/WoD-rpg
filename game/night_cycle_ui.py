@@ -5,8 +5,10 @@ import streamlit as st
 from .chronicle import CLAN_LABELS, OFFICE_LABELS
 from .chronicle_politics import primary_office
 from .chronicle_service import ChronicleService, chronicle_time_label, ellipse_label
+from .chronicle_world_store import ChronicleWorldStore
 from .night_cycle import (
     NightPhase,
+    available_situations,
     choose_night_event,
     free_action_situations,
     resolve_free_action,
@@ -14,14 +16,29 @@ from .night_cycle import (
     time_remaining_text,
 )
 from .night_cycle_store import NightCycleStore
-from .situations import generate_situations
 
 
-def _situation_for_id(character, profile, simulation, *, year: int, situation_id: str):
+def _situation_for_id(
+    character,
+    profile,
+    simulation,
+    *,
+    year: int,
+    situation_id: str,
+    world_events=(),
+    nights_per_cycle: int = 3,
+):
     return next(
         (
             item
-            for item in generate_situations(character, profile, simulation, year=year)
+            for item in available_situations(
+                character,
+                profile,
+                simulation,
+                year=year,
+                world_events=world_events,
+                nights_per_cycle=nights_per_cycle,
+            )
             if item.id == situation_id
         ),
         None,
@@ -185,7 +202,15 @@ def render_night_cycle(
     progress,
 ) -> None:
     night_store = NightCycleStore(store.repository)
-    proposed_event = choose_night_event(character, profile, simulation, year=progress.year)
+    world_events = ChronicleWorldStore(store.repository).list_events(character.game_id, limit=12)
+    proposed_event = choose_night_event(
+        character,
+        profile,
+        simulation,
+        year=progress.year,
+        world_events=world_events,
+        nights_per_cycle=progress.nights_per_segment,
+    )
     night_state = night_store.ensure(character, event_id=proposed_event.id)
 
     st.subheader(f"Nuit significative {character.local_night}")
@@ -200,6 +225,8 @@ def render_night_cycle(
             simulation,
             year=progress.year,
             situation_id=night_state.event_id,
+            world_events=world_events,
+            nights_per_cycle=progress.nights_per_segment,
         )
         if event is None:
             st.error("L'événement persistant de cette nuit n'est plus disponible dans le moteur.")
@@ -210,6 +237,8 @@ def render_night_cycle(
         )
         with st.container(border=True):
             st.markdown("### Événement de la nuit")
+            if event.id.startswith("world_event_"):
+                st.caption("Écho du Cycle précédent — information imparfaite, issue d'un changement réel du monde.")
             st.markdown(f"#### {event.title}")
             st.write(event.body)
             play, choice_id, free_intent = _render_choice_form(
@@ -264,6 +293,8 @@ def render_night_cycle(
             simulation,
             year=progress.year,
             event_id=night_state.event_id,
+            world_events=world_events,
+            nights_per_cycle=progress.nights_per_segment,
         )
         if not actions:
             st.warning("Aucune entreprise pertinente n'est actuellement disponible.")
@@ -322,7 +353,7 @@ def render_night_cycle(
 
 
 def install_night_cycle_ui() -> None:
-    """Install the V0.46 Chronicle time and night renderers."""
+    """Install the V0.47 Chronicle time, night and emergent-intrigue renderers."""
 
     from . import chronicle_ui
 
