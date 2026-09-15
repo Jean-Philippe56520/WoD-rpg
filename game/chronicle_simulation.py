@@ -4,7 +4,7 @@ from dataclasses import dataclass, field, replace
 import hashlib
 from typing import Mapping
 
-from .chronicle import PlayerCharacter, SIRE_GENERATIONS, SIRES
+from .chronicle import PlayerCharacter, SIRES
 from .era import CamarillaStage, EraRules, era_for_year
 
 
