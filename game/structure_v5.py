@@ -24,20 +24,21 @@ SYSTEMES_V5: tuple[SystemeV5, ...] = (
     SystemeV5("difficulte", "Difficulté", "intégré", "adapter", ("game/dice.py", "game/situations.py"), "Le seuil exact reste caché ; le joueur reçoit un indice narratif."),
     SystemeV5("faim", "Faim et dés de Faim", "intégré", "conserver", ("game/dice.py", "game/chronicle.py"), "Les dés de Faim remplacent des dés ordinaires dans le groupement."),
     SystemeV5("critiques", "Critiques, réussite bestiale et échec bestial", "intégré", "conserver", ("game/dice.py", "game/consequences.py"), "Les conséquences persistantes sont graduées autour du résultat V5."),
-    SystemeV5("volonte", "Volonté", "intégré", "simplifier", ("game/vampire_profile.py", "game/night_cycle.py"), "Relance de dés ordinaires, usure et récupération adaptées au rythme asynchrone."),
+    SystemeV5("volonte", "Volonté", "intégré", "simplifier", ("game/vampire_profile.py", "game/night_cycle.py"), "Relance de dés ordinaires, usure et récupération adaptées au rythme asynchrone ; la piste détaillée de dégâts de Volonté reste simplifiée."),
     SystemeV5("exaltation", "Test d’Exaltation", "intégré", "conserver", ("game/dice.py", "game/night_cycle.py", "game/health.py"), "Utilisé pour le Coup de Sang et la guérison vampirique."),
     SystemeV5("reveil", "Réveil nocturne", "différé", "adapter", (), "Une Nuit significative n'est pas nécessairement une nuit civile ; l'Exaltation du réveil exige une adaptation temporelle explicite avant automatisation."),
     SystemeV5("coup_de_sang", "Coup de Sang", "intégré", "conserver", ("game/mecaniques_vampiriques.py",), "Bonus selon la Puissance du Sang."),
     SystemeV5("generation", "Génération", "intégré", "conserver", ("game/vampire_profile.py",), "Déduite du sire lors de la création."),
-    SystemeV5("puissance_sang", "Puissance du Sang", "partiel", "compléter", ("game/vampire_profile.py", "game/mecaniques_vampiriques.py", "game/health.py"), "Coup de Sang et quantité de dégâts superficiels guéris sont gérés ; restent bonus complets de Disciplines et contraintes alimentaires."),
+    SystemeV5("puissance_sang", "Puissance du Sang", "partiel", "compléter", ("game/vampire_profile.py", "game/mecaniques_vampiriques.py", "game/health.py"), "Coup de Sang, Sévérité du Fléau et quantité de dégâts superficiels guéris sont structurés ; restent les bonus complets de Disciplines et contraintes alimentaires."),
     SystemeV5("guerison", "Guérison vampirique", "intégré", "conserver", ("game/health.py",), "Un Test d'Exaltation soigne les dégâts superficiels selon la Puissance du Sang ; trois Tests peuvent soigner un aggravé, avec blocage à Faim 5."),
     SystemeV5("sante", "Santé et dégâts", "intégré", "conserver", ("game/vampire_profile.py", "game/health.py"), "Santé = Vigueur + 3, dégâts superficiels/aggravés, altération physique, conversion, torpeur et guérison sont structurés."),
-    SystemeV5("humanite", "Humanité, Flétrissures et Remords", "partiel", "compléter", ("game/chronicle.py", "game/humanity.py", "game/night_cycle_store.py"), "La piste, les Flétrissures et le Remords sont structurés ; les situations de production doivent encore déclarer explicitement leurs transgressions morales et la surcharge de piste reste simplifiée."),
+    SystemeV5("humanite", "Humanité, Flétrissures et Remords", "partiel", "compléter", ("game/chronicle.py", "game/humanity.py", "game/night_cycle_store.py"), "La piste, les Flétrissures et le Remord sont structurés ; les situations de production doivent encore déclarer explicitement leurs transgressions morales et la surcharge de piste reste simplifiée."),
     SystemeV5("convictions", "Convictions", "partiel", "compléter", ("game/creation_rules.py", "game/vampire_profile.py", "game/humanity.py"), "Les nouveaux personnages n'obtiennent plus le bonus de Compétence maison ; une Conviction pertinente peut atténuer une Flétrissure. Les anciennes fiches ne sont pas rétroactivement recalculées."),
     SystemeV5("attaches", "Attaches humaines", "écarté", "adapter", ("game/vampire_profile.py",), "Les Attaches ont été retirées du parcours joueur ; Humanité repose sur Convictions, Principes, relations et conséquences persistantes."),
     SystemeV5("principes_chronique", "Principes de chronique", "intégré", "conserver", ("game/humanity.py", "game/morality_stakes.py"), "Trois Principes par défaut sont structurés et les transgressions doivent être déclarées explicitement par le contenu."),
-    SystemeV5("frenesie", "Frénésie et Compulsions", "différé", "prioritaire", ("game/clans.py",), "Les déclencheurs de Fléau sont décrits mais la résolution de Frénésie et de Compulsion reste à créer."),
-    SystemeV5("fleaux", "Fléaux de clan", "partiel", "compléter", ("game/clans.py", "game/situations.py"), "Ventrue est déjà relié à la chasse ; Brujah et Toreador doivent recevoir une mécanique explicite."),
+    SystemeV5("frenesie", "Frénésie", "partiel", "brancher", ("game/beast.py", "game/mecaniques_vampiriques.py"), "Fureur, Faim et Terreur, pool Volonté restante + Humanité/3, Chevaucher la vague et malus Brujah sont structurés. Les provocations doivent encore être déclarées par les scènes avant branchement automatique."),
+    SystemeV5("compulsions", "Compulsions", "partiel", "brancher", ("game/beast.py", "game/vampire_profile.py"), "Rébellion Brujah, Obsession Toreador et Arrogance Ventrue sont structurées, persistables et capables de produire un malus de -2. Le cycle de nuit doit encore les déclencher automatiquement sur les résultats bestiaux."),
+    SystemeV5("fleaux", "Fléaux de clan", "partiel", "compléter", ("game/clans.py", "game/beast.py", "game/mecaniques_vampiriques.py"), "La Sévérité du Fléau et le malus Brujah aux Frénésies de Fureur sont structurés. La restriction Ventrue est décrite dans la chasse ; l'effet Toreador doit encore recevoir un déclencheur explicite."),
     SystemeV5("disciplines", "Disciplines et pouvoirs", "partiel", "progressif", ("game/mecaniques_vampiriques.py", "game/chronicle.py"), "Ne modéliser que les pouvoirs réellement accessibles et utiles aux scènes."),
     SystemeV5("liens_sang", "Lien du Sang", "différé", "compléter", (), "Important pour un jeu politique vampirique, mais distinct des relations ordinaires et pas encore structuré."),
     SystemeV5("historiques", "Historiques et Avantages", "partiel", "prioritaire", ("game/vampire_profile.py",), "Sire, Contacts, Ressources et Statut sont stockés mais pas encore tous exploités par les situations."),
@@ -69,6 +70,6 @@ def rapport_structure_v5() -> dict[str, object]:
     for systeme in SYSTEMES_V5:
         comptes[systeme.statut] += 1
     priorites = tuple(
-        systeme.id for systeme in SYSTEMES_V5 if systeme.cible in {"prioritaire", "compléter"}
+        systeme.id for systeme in SYSTEMES_V5 if systeme.cible in {"prioritaire", "compléter", "brancher"}
     )
     return {"total": len(SYSTEMES_V5), "comptes": comptes, "priorites": priorites}

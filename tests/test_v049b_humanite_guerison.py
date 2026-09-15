@@ -126,7 +126,7 @@ def test_fletrissures_persistent_dans_le_json_du_profil():
     profile = replace(default_profile(make_character()), humanity_stains=2)
     restored = profile_from_dict(profile_to_dict(profile))
     assert restored.humanity_stains == 2
-    assert restored.schema_version == 4
+    assert restored.schema_version == 5
 
 
 def test_nouvelles_convictions_ne_donnent_plus_de_bonus_de_competence_maison():
