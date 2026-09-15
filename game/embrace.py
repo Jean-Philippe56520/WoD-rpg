@@ -3,9 +3,9 @@ from __future__ import annotations
 from copy import deepcopy
 
 from .config import DEFAULT_RULES, GameRules
-from .coteries import initialize_coteries
+from .factions import initialize_factions
 from .models import (
-    CoterieSide,
+    ClanFactionSide,
     EmbracePetitionOrder,
     EmbraceRequest,
     EmbraceStatus,
@@ -34,7 +34,7 @@ def calculate_embrace_cost(
     if requester_id not in state.characters:
         raise ValueError(f"Unknown requester: {requester_id}")
 
-    initialize_coteries(state)
+    initialize_factions(state)
     requester = state.characters[requester_id]
     if not requester.clan_id or requester.clan_id not in state.clan_states:
         raise ValueError("Requester must belong to a playable clan")
@@ -50,10 +50,10 @@ def calculate_embrace_cost(
         else:
             cost += rules.embrace_other_clan_modifier
 
-    requester_side = state.clan_states[requester.clan_id].coterie_memberships.get(
-        requester.id, CoterieSide.PRIMOGEN
+    requester_side = state.clan_states[requester.clan_id].faction_memberships.get(
+        requester.id, ClanFactionSide.PRIMOGEN
     )
-    if requester_side == CoterieSide.PRIMOGEN:
+    if requester_side == ClanFactionSide.PRIMOGEN:
         cost += rules.embrace_primogen_current_modifier
     else:
         cost += rules.embrace_rival_current_modifier
@@ -74,7 +74,7 @@ def create_embrace_request(
         raise ValueError("A proposed childe name is required")
 
     next_state = deepcopy(state)
-    initialize_coteries(next_state)
+    initialize_factions(next_state)
     requester = next_state.characters.get(requester_id)
     if requester is None or not requester.clan_id:
         raise ValueError("Requester must be a known clan member")
@@ -162,7 +162,7 @@ def decide_embrace_request(
         + _relation_delta(approve, request.primogen_position, rules)
     )
 
-    initialize_coteries(next_state)
+    initialize_factions(next_state)
     prince = next_state.characters[next_state.prince_id]
     next_state.events.append(
         GameEvent(
