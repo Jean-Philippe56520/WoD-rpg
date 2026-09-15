@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from .domains import initialize_domains
 from .factions import initialize_factions
 from .models import (
     BloodRank,
@@ -61,7 +62,7 @@ def seed_characters() -> dict[str, Character]:
             id="ventrue_helene", name="Helene Beaumont", clan_id="ventrue",
             personal_influence=12, mortal_stance=MortalStance.HUMANIST,
             order_stance=OrderStance.ORTHODOX, humanity=7, status=1, reputation=0,
-            political_ambition=PoliticalAmbition.INCREASE_INFLUENCE,
+            political_ambition=PoliticalAmbition.GAIN_DOMAIN,
             physical=0, social=1, mental=2,
             expertises=("Investigation", "Finance"),
             disciplines={"domination": 1, "presence": 1},
@@ -249,5 +250,6 @@ def create_initial_game_state() -> GameState:
     }
     state = GameState(characters=characters, clan_states=clan_states)
     initialize_factions(state)
+    initialize_domains(state)
     generate_requests_for_night(state)
     return state
