@@ -10,6 +10,7 @@ from .chronicle import (
     CHRONICLE_NAME,
     CLAN_DISCIPLINES,
     CLAN_LABELS,
+    OFFICE_LABELS,
     ChronicleProgress,
     PersonalAction,
     SUPPORTED_CLANS,
@@ -18,7 +19,10 @@ from .chronicle import (
     resolve_personal_night,
     sire_for_id,
 )
+from .chronicle_scenes import ChronicleSceneStore
+from .chronicle_service import ChronicleService
 from .chronicle_store import ChronicleStore
+from .chronicle_world_store import ChronicleWorldStore
 from .models import GameState
 
 
@@ -49,7 +53,7 @@ def _render_creation(store: ChronicleStore, player_id: str, default_player_name:
     st.caption("1435 · La société caïnite se cherche encore un ordre commun")
     st.markdown(
         "Vous n'êtes pas un clan. Vous êtes un vampire récemment Étreint, encore dépendant de votre sire, "
-        "avec peu de Statut et presque aucun poids politique. Ce que vous deviendrez dépendra des nuits à venir."
+        "avec peu de Statut et presque aucun poids politique. Votre place se gagnera nuit après nuit."
     )
 
     with st.form("create_player_character"):
@@ -81,11 +85,11 @@ def _render_creation(store: ChronicleStore, player_id: str, default_player_name:
         )
         long_term_goal = st.text_input(
             "Ambition à long terme",
-            placeholder="Ex. obtenir un domaine, devenir indispensable à la Cour…",
+            placeholder="Ex. obtenir un Domaine, devenir indispensable à la Cour…",
         )
         chapter_goal = st.text_input(
             "Objectif du premier chapitre",
-            placeholder="Ex. comprendre les attentes de mon sire, gagner mon indépendance…",
+            placeholder="Ex. comprendre mon sire, obtenir une autonomie de chasse…",
         )
         submitted = st.form_submit_button(
             "Commencer la chronique",
@@ -131,27 +135,32 @@ def _render_header(character, progress) -> None:
     st.title(character.name)
     st.caption(
         f"{CLAN_LABELS[character.clan_id]} · {character.concept} · "
-        f"Étreint en {character.embraced_year}"
+        f"Étreint en {character.embraced_year} · {OFFICE_LABELS.get(character.office, character.office)}"
     )
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("Année", progress.year)
     col2.metric("Chapitre", progress.chapter)
     col3.metric("Segment", f"{progress.segment}/{progress.segments_per_chapter}")
-    if character.ready_for_convergence:
-        col4.metric("Nuit", f"{progress.nights_per_segment}/{progress.nights_per_segment}")
-    else:
-        col4.metric("Nuit", f"{character.local_night}/{progress.nights_per_segment}")
+    current_night = progress.nights_per_segment if character.ready_for_convergence else character.local_night
+    col4.metric("Nuit", f"{current_night}/{progress.nights_per_segment}")
 
-    vital1, vital2, vital3, vital4 = st.columns(4)
+    vital1, vital2, vital3, vital4, vital5 = st.columns(5)
     vital1.metric("Faim", f"{character.hunger}/5")
     vital2.metric("Humanité", f"{character.humanity}/10")
     vital3.metric("Statut", character.status)
     vital4.metric("Influence", f"{character.personal_influence:.1f}")
+    vital5.metric("Expérience", character.experience)
 
 
 def _render_sire(character) -> None:
-    sire = sire_for_id(character.sire_id)
     with st.container(border=True):
+        try:
+            sire = sire_for_id(character.sire_id)
+        except ValueError:
+            st.markdown(f"### Votre sire — {character.sire_name}")
+            st.write(f"**Relation :** {character.sire_relation}/3")
+            st.caption("Votre sire appartient à votre lignée persistante.")
+            return
         st.markdown(f"### Votre sire — {sire.name}")
         st.caption(sire.title)
         st.write(sire.description)
@@ -161,7 +170,7 @@ def _render_sire(character) -> None:
 
 
 def _render_journal(store: ChronicleStore, character) -> None:
-    history = store.list_history(character.game_id, character.character_id, limit=20)
+    history = store.list_history(character.game_id, character.character_id, limit=30)
     if not history:
         st.caption("Aucune nuit n'a encore été jouée.")
         return
@@ -177,37 +186,169 @@ def _render_journal(store: ChronicleStore, character) -> None:
                 st.caption(detail)
 
 
-def _render_convergence(store: ChronicleStore, character, progress) -> None:
+def _render_convergence(repo, store: ChronicleStore, character, progress) -> None:
     st.subheader("Convergence")
     st.write(
-        "Vous avez terminé vos nuits personnelles de ce segment. Vous pouvez encore consulter votre journal "
-        "et vos relations, mais le prochain segment ne commencera qu'une fois les trajectoires réunies."
+        "Vos nuits personnelles de ce segment sont terminées. Le monde peut continuer à discuter et à "
+        "échanger, mais le prochain segment ne devient canonique qu'après la convergence."
     )
     characters = [pc for pc in store.list_characters(character.game_id) if pc.is_active]
-    ready = [pc for pc in characters if pc.ready_for_convergence]
-    st.progress(len(ready) / max(1, len(characters)))
-    st.caption(f"{len(ready)}/{len(characters)} personnage(s) prêt(s).")
-    for pc in characters:
+    current_characters = [
+        pc
+        for pc in characters
+        if pc.chapter == progress.chapter and pc.segment == progress.segment
+    ]
+    ready = [pc for pc in current_characters if pc.ready_for_convergence]
+    st.progress(len(ready) / max(1, len(current_characters)))
+    st.caption(f"{len(ready)}/{len(current_characters)} personnage(s) prêt(s).")
+    for pc in current_characters:
         marker = "Prêt" if pc.ready_for_convergence else f"Nuit {pc.local_night}/{progress.nights_per_segment}"
         st.write(f"- {pc.name} — {CLAN_LABELS[pc.clan_id]} — {marker}")
 
     if store.all_ready_for_convergence(character.game_id):
         st.success("Toutes les trajectoires ont rejoint le point de convergence.")
         if st.button("Résoudre la convergence", type="primary", use_container_width=True):
-            next_progress = store.resolve_convergence(character.game_id)
-            if next_progress.chapter > progress.chapter:
-                st.session_state["wod_last_chronicle_notice"] = (
+            result = ChronicleService(repo).resolve_convergence(character.game_id)
+            beats = " ".join(beat.public_text for beat in result.world_beats[:2])
+            if result.next_progress.chapter > progress.chapter:
+                notice = (
                     f"Le chapitre {progress.chapter} s'achève. Une ellipse de "
-                    f"{next_progress.year - progress.year} an(s) conduit la chronique en {next_progress.year}."
+                    f"{result.next_progress.year - progress.year} an(s) conduit la chronique en "
+                    f"{result.next_progress.year}."
                 )
             else:
-                st.session_state["wod_last_chronicle_notice"] = (
-                    f"La convergence est résolue. Le segment {next_progress.segment} commence."
-                )
+                notice = f"La convergence est résolue. Le segment {result.next_progress.segment} commence."
+            if beats:
+                notice += f" Pendant ce temps : {beats}"
+            st.session_state["wod_last_chronicle_notice"] = notice
             st.rerun()
 
 
-def render_chronicle_app(repo, *, player_id: str, player_name: str = "Joueur", backend_label: str = "") -> None:
+def _character_names(store: ChronicleStore, game_id: str) -> dict[str, str]:
+    return {character.character_id: character.name for character in store.list_characters(game_id)}
+
+
+def _render_scenes(repo, store: ChronicleStore, character, progress) -> None:
+    scenes = ChronicleSceneStore(repo)
+    characters = [
+        pc
+        for pc in store.list_characters(character.game_id)
+        if pc.is_active and pc.character_id != character.character_id
+    ]
+    names = _character_names(store, character.game_id)
+
+    st.subheader("Scènes entre personnages")
+    st.caption(
+        "Ces échanges sont asynchrones : vous pouvez ouvrir une scène puis continuer vos nuits. "
+        "L'autre joueur répondra lorsqu'il se reconnectera."
+    )
+
+    if characters:
+        with st.form(f"open_scene_{character.chapter}_{character.segment}_{character.local_night}"):
+            target_id = st.selectbox(
+                "Personnage à contacter",
+                options=[pc.character_id for pc in characters],
+                format_func=lambda value: names[value],
+            )
+            title = st.text_input("Objet de la scène", max_chars=160)
+            opening = st.text_area("Votre approche", max_chars=2000)
+            opened = st.form_submit_button("Ouvrir la scène", use_container_width=True)
+        if opened:
+            try:
+                scenes.create_scene(
+                    game_id=character.game_id,
+                    from_character_id=character.character_id,
+                    to_character_id=target_id,
+                    chapter=character.chapter,
+                    segment=character.segment,
+                    night_number=character.local_night,
+                    title=title,
+                    opening_text=opening,
+                )
+                st.success("La scène a été transmise. Elle ne bloque pas votre progression personnelle.")
+                st.rerun()
+            except ValueError as exc:
+                st.error(str(exc))
+    else:
+        st.info("Aucun autre personnage joueur n'a encore rejoint cette chronique.")
+
+    st.markdown("### Reçues")
+    incoming = scenes.list_incoming(character.game_id, character.character_id)
+    if not incoming:
+        st.caption("Aucune scène reçue.")
+    for scene in incoming:
+        with st.container(border=True):
+            sender = names.get(scene.from_character_id, scene.from_character_id)
+            st.markdown(f"**{scene.title}** — {sender}")
+            st.caption(
+                f"Chapitre {scene.chapter} · Segment {scene.segment} · Nuit {scene.night_number} · {scene.status}"
+            )
+            st.write(scene.opening_text)
+            if scene.response_text:
+                st.write(f"**Votre réponse :** {scene.response_text}")
+            elif scene.status == "open":
+                with st.form(f"respond_scene_{scene.id}"):
+                    response = st.text_area("Répondre", max_chars=2000, key=f"response_{scene.id}")
+                    respond = st.form_submit_button("Envoyer la réponse", use_container_width=True)
+                if respond:
+                    try:
+                        scenes.respond(
+                            scene,
+                            character_id=character.character_id,
+                            response_text=response,
+                        )
+                        st.success("Réponse transmise.")
+                        st.rerun()
+                    except ValueError as exc:
+                        st.error(str(exc))
+
+    st.markdown("### Envoyées")
+    outgoing = scenes.list_outgoing(character.game_id, character.character_id)
+    if not outgoing:
+        st.caption("Aucune scène envoyée.")
+    for scene in outgoing:
+        with st.container(border=True):
+            target = names.get(scene.to_character_id, scene.to_character_id)
+            st.markdown(f"**{scene.title}** — à {target}")
+            st.caption(f"Statut : {scene.status}")
+            st.write(scene.opening_text)
+            if scene.response_text:
+                st.write(f"**Réponse :** {scene.response_text}")
+
+
+def _render_world(repo, progress) -> None:
+    st.subheader(f"{progress.year} — un ordre encore incertain")
+    st.write(
+        "Les anciens, les sires et les institutions poursuivent leurs propres intérêts. Ils n'attendent pas "
+        "les ordres des joueurs : leurs décisions deviennent visibles aux points de convergence."
+    )
+    events = ChronicleWorldStore(repo).list_events(CHRONICLE_GAME_ID, limit=20)
+    if events:
+        st.markdown("### Ce qui a changé autour de vous")
+        for event in events:
+            with st.container(border=True):
+                st.write(event["public_text"])
+                st.caption(
+                    f"{event['year']} · Chapitre {event['chapter']} · Segment {event['segment']}"
+                )
+    else:
+        st.caption("La première convergence n'a pas encore produit d'événement partagé.")
+
+    st.markdown("### Rythme de la chronique")
+    st.write(
+        f"Vous pouvez jouer jusqu'à **{progress.nights_per_segment} nuits personnelles** sans attendre les "
+        "autres. Les scènes PJ restent asynchrones. Une convergence rassemble ensuite les conséquences "
+        "avant le segment suivant."
+    )
+
+
+def render_chronicle_app(
+    repo,
+    *,
+    player_id: str,
+    player_name: str = "Joueur",
+    backend_label: str = "",
+) -> None:
     store = _ensure_chronicle(repo)
     progress = store.get_progress(CHRONICLE_GAME_ID)
     if progress is None:
@@ -234,23 +375,24 @@ def render_chronicle_app(repo, *, player_id: str, player_name: str = "Joueur", b
         st.write(f"**Personnage :** {character.name}")
         st.write(f"**Clan :** {CLAN_LABELS[character.clan_id]}")
         st.write(f"**Sire :** {character.sire_name}")
+        st.write(f"**Fonction :** {OFFICE_LABELS.get(character.office, character.office)}")
 
     _render_header(character, progress)
 
-    night_tab, relations_tab, journal_tab, world_tab = st.tabs(
-        ["Cette nuit", "Mes liens", "Journal", "Le monde"]
+    night_tab, scenes_tab, relations_tab, journal_tab, world_tab = st.tabs(
+        ["Cette nuit", "Scènes", "Mes liens", "Journal", "Le monde"]
     )
 
     with night_tab:
         if character.ready_for_convergence:
-            _render_convergence(store, character, progress)
+            _render_convergence(repo, store, character, progress)
         else:
             st.subheader(f"Nuit {character.local_night}")
             st.info(nightly_hook(character))
             st.write(f"**Objectif du chapitre :** {character.chapter_goal}")
             st.caption(
-                f"Progression actuelle : {character.goal_progress}. Il ne s'agit pas d'une quête linéaire : "
-                "ce score mesure simplement ce que votre vampire a réellement réussi à construire."
+                f"Progression actuelle : {character.goal_progress}. Ce score sert au bilan du chapitre ; "
+                "il ne remplace pas les conséquences narratives."
             )
             with st.form(f"personal_night_{character.chapter}_{character.segment}_{character.local_night}"):
                 action = st.selectbox(
@@ -260,7 +402,7 @@ def render_chronicle_app(repo, *, player_id: str, player_name: str = "Joueur", b
                 )
                 free_intent = st.text_area(
                     "Précision libre",
-                    placeholder="Ex. je cherche le copiste aperçu hier, je veux savoir qui l'emploie…",
+                    placeholder="Ex. je cherche le copiste aperçu hier et veux savoir qui l'emploie…",
                     max_chars=500,
                 )
                 play = st.form_submit_button(
@@ -281,29 +423,24 @@ def render_chronicle_app(repo, *, player_id: str, player_name: str = "Joueur", b
                 )
                 st.rerun()
 
+    with scenes_tab:
+        _render_scenes(repo, store, character, progress)
+
     with relations_tab:
         _render_sire(character)
         st.markdown("### Votre position")
         st.write(f"**Ambition :** {character.long_term_goal}")
         st.write(f"**Réputation :** {character.reputation:+d}")
         st.write(f"**Discipline dominante :** {character.starting_discipline}")
+        st.write(f"**Expérience accumulée :** {character.experience}")
+        st.write(f"**Fonction :** {OFFICE_LABELS.get(character.office, character.office)}")
         st.caption(
-            "Les autres membres du clan, la Cour et les coteries ne sont pas vos unités. Ils agiront pour leurs "
-            "propres intérêts au fur et à mesure de la refonte du moteur autonome."
+            "Le Primogénat, un Domaine ou la Praxis seront des positions politiques à obtenir. "
+            "Aucune fonction ne vous donne le contrôle direct des autres vampires."
         )
 
     with journal_tab:
         _render_journal(store, character)
 
     with world_tab:
-        st.subheader("1435 — un ordre encore incertain")
-        st.write(
-            "Les anciens cherchent à contenir les révoltes, les menaces mortelles et leurs propres rivalités. "
-            "Les institutions qui deviendront centrales dans les siècles suivants ne constituent pas encore un "
-            "cadre uniforme. Votre vampire entre dans l'histoire avant d'en connaître l'issue."
-        )
-        st.markdown("### Rythme de la chronique")
-        st.write(
-            f"Vous pouvez jouer jusqu'à **{progress.nights_per_segment} nuits personnelles** sans attendre les "
-            "autres. Ensuite, une convergence rassemble les trajectoires avant le segment suivant."
-        )
+        _render_world(repo, progress)
