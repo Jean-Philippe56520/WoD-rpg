@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from .config import DEFAULT_RULES, GameRules
 from .models import (
+    ActionType,
     ClanNightOrders,
     ClanNightReport,
     DomainDecisionType,
@@ -38,6 +39,8 @@ class MultiplayerGameService:
         if clan_id not in state.clan_states:
             raise ValueError(f"Unknown clan: {clan_id}")
 
+        primogen_id = state.clan_states[clan_id].clan.primogen_id
+
         if orders.version >= 2:
             eligible_ids = {
                 character.id
@@ -56,6 +59,11 @@ class MultiplayerGameService:
                     raise ValueError("Action actor must be an active member of the player's clan")
                 if action.actor_character_id in used_actors:
                     raise ValueError("A vampire can perform only one action per night")
+                if action.action_type == ActionType.CHALLENGE_PRAXIS:
+                    if state.prince_id is None:
+                        raise ValueError("No recognized Prince can be challenged")
+                    if action.actor_character_id != primogen_id:
+                        raise ValueError("Only the current Primogen may challenge the Praxis")
                 used_actors.add(action.actor_character_id)
             if used_actors != eligible_ids:
                 raise ValueError("Every active clan member must receive exactly one action")
@@ -66,6 +74,8 @@ class MultiplayerGameService:
             for action in orders.actions:
                 if action.clan_id != clan_id:
                     raise ValueError("A player cannot submit actions for another clan")
+                if action.action_type == ActionType.CHALLENGE_PRAXIS:
+                    raise ValueError("Praxis challenge requires V0.8+ explicit actor orders")
 
         if orders.version >= 3:
             open_request_ids = {
@@ -80,8 +90,6 @@ class MultiplayerGameService:
                 raise ValueError("Every open political request must receive a Primogen decision")
         elif orders.request_decisions:
             raise ValueError("Political request decisions require V0.9 orders")
-
-        primogen_id = state.clan_states[clan_id].clan.primogen_id
 
         if orders.version >= 4:
             if len(orders.domain_decisions) > self.rules.domain_decisions_per_clan:
