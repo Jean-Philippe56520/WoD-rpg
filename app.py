@@ -19,6 +19,7 @@ from game.browser_session import (
     read_device_refresh_token,
 )
 from game.chronicle_ui import render_chronicle_app
+from game.night_cycle_ui import install_night_cycle_ui
 from game.coterie_ui import render_coteries_panel
 from game.court_ui import render_court_panel
 from game.crisis_ui import render_crises_panel
@@ -52,6 +53,7 @@ st.set_page_config(
 )
 
 _ORIGINAL_CREATE_REPOSITORY = repository_factory.create_repository
+install_night_cycle_ui()
 
 
 @st.cache_resource
@@ -194,7 +196,7 @@ mode = st.sidebar.radio(
     format_func=lambda value: "Chronique" if value == PRODUCTION_MODE else "Atelier legacy (test/dev)",
     key="wod_runtime_mode_selector",
 )
-st.sidebar.caption("Moteur V0.44 — mémoire relationnelle persistante")
+st.sidebar.caption("Moteur V0.45 — événement nocturne et actions libres")
 set_runtime_mode(mode)
 
 try:
