@@ -32,22 +32,35 @@ def degre_issue(dice) -> DegreIssue:
     """Classe une résolution V5 sans remplacer ses règles de réussite.
 
     Le jet reste un jet V5 : cette couche sert uniquement à calibrer la portée
-    des conséquences persistantes de WoD-rpg.
+    des conséquences persistantes de WoD-rpg. Les anciens doubles de test sans
+    marge restent acceptés afin de préserver les contrats historiques du moteur.
     """
 
-    if dice.messy_critical:
+    if bool(getattr(dice, "messy_critical", False)):
         return DegreIssue.REUSSITE_BESTIALE
-    if dice.bestial_failure:
+    if bool(getattr(dice, "bestial_failure", False)):
         return DegreIssue.ECHEC_GRAVE
-    if dice.success:
-        if dice.critical or dice.margin >= 3:
+
+    success = bool(getattr(dice, "success", False))
+    critical = bool(getattr(dice, "critical", False))
+    margin = getattr(dice, "margin", None)
+
+    if success:
+        if critical:
             return DegreIssue.REUSSITE_EXCEPTIONNELLE
-        if dice.margin >= 1:
+        if margin is None:
+            return DegreIssue.REUSSITE_NETTE
+        if margin >= 3:
+            return DegreIssue.REUSSITE_EXCEPTIONNELLE
+        if margin >= 1:
             return DegreIssue.REUSSITE_NETTE
         return DegreIssue.REUSSITE_COUTEUSE
-    if dice.margin == -1:
+
+    if margin is None:
+        return DegreIssue.ECHEC_SERIEUX
+    if margin == -1:
         return DegreIssue.ECHEC_LIMITE
-    if dice.margin >= -3:
+    if margin >= -3:
         return DegreIssue.ECHEC_SERIEUX
     return DegreIssue.ECHEC_GRAVE
 
@@ -64,17 +77,19 @@ def famille_action(attribute: str) -> str:
 
 def consequence_graduee(choice, dice) -> ConsequenceGraduee:
     degre = degre_issue(dice)
-    famille = famille_action(choice.attribute)
+    famille = famille_action(getattr(choice, "attribute", ""))
 
     usure_volonte = 0
-    if not dice.success and famille in {"sociale", "mentale"}:
+    if not bool(getattr(dice, "success", False)) and famille in {"sociale", "mentale"}:
         if degre == DegreIssue.ECHEC_SERIEUX:
             usure_volonte = 1
         elif degre == DegreIssue.ECHEC_GRAVE:
             usure_volonte = 2
 
     pression_faim = 0
-    if choice.effect in {"hunt", "hunt_social"} and not dice.success:
+    if getattr(choice, "effect", "") in {"hunt", "hunt_social"} and not bool(
+        getattr(dice, "success", False)
+    ):
         if degre in {DegreIssue.ECHEC_SERIEUX, DegreIssue.ECHEC_GRAVE}:
             pression_faim = 1
 
