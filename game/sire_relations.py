@@ -33,7 +33,10 @@ def sire_bond(character: PlayerCharacter, profile: VampireProfile, era: EraRules
             protection_text="Vous ne pouvez plus présumer que les droits et refuges de votre sire vous appartiennent.",
             can_seek_release=False,
         )
-    can_seek = character.status >= 1 or character.personal_influence >= 2.0 or character.goal_progress >= 3
+
+    # V0.40 deliberately stops using the old generic goal_progress counter as
+    # a hidden level. Emancipation is unlocked by an observable social position.
+    can_seek = character.status >= 1 or character.personal_influence >= 2.0
     if can_seek:
         return SireBond(
             stage=SireBondStage.NEGOTIATING_RELEASE,
