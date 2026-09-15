@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from .config import DEFAULT_RULES, GameRules
 from .embrace import resolve_embrace_reactions
 from .factions import (
     effective_relation_to_primogen,
@@ -124,7 +125,10 @@ def _ambition_reactions(state: GameState) -> list[GameEvent]:
     return events
 
 
-def resolve_autonomous_reactions(state: GameState) -> list[GameEvent]:
+def resolve_autonomous_reactions(
+    state: GameState,
+    rules: GameRules = DEFAULT_RULES,
+) -> list[GameEvent]:
     """Réactions PNJ post-résolution, déterministes et motivées par l'état politique."""
 
     events: list[GameEvent] = []
@@ -144,7 +148,7 @@ def resolve_autonomous_reactions(state: GameState) -> list[GameEvent]:
             )
         )
     events.extend(_resolve_called_boons(state))
-    events.extend(resolve_embrace_reactions(state))
+    events.extend(resolve_embrace_reactions(state, rules))
     events.extend(_defection_reactions(state))
     events.extend(_ambition_reactions(state))
     return events
