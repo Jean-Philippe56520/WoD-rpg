@@ -4,6 +4,40 @@ from dataclasses import dataclass
 import hashlib
 
 
+DIFFICULTY_BANDS: tuple[tuple[int, int | None, str, str], ...] = (
+    (1, 1, "facile", "Cette approche paraît favorable dans les circonstances visibles."),
+    (2, 3, "standard", "Cette approche paraît accessible, mais une mauvaise exécution peut suffire à la faire échouer."),
+    (4, 5, "difficile", "Cette approche paraît exigeante ; un avantage, une préparation ou un bon pool peuvent faire la différence."),
+    (6, None, "extrême", "Cette approche paraît hors de portée sans circonstances exceptionnellement favorables."),
+)
+
+
+def difficulty_band(difficulty: int) -> str:
+    """Return the player-facing difficulty band without exposing the target number.
+
+    WoD-rpg keeps the exact target inside the engine. The UI only exposes a
+    coarse estimate: 2-3 standard, 4-5 difficult, 6+ extreme. Difficulty 1 is
+    treated as easy for completeness.
+    """
+
+    if difficulty < 1:
+        raise ValueError("Difficulty must be positive")
+    for minimum, maximum, label, _ in DIFFICULTY_BANDS:
+        if difficulty >= minimum and (maximum is None or difficulty <= maximum):
+            return label
+    raise AssertionError("Unreachable difficulty band")
+
+
+def difficulty_hint(difficulty: int) -> str:
+    """Return a diegetic risk clue while keeping the exact difficulty hidden."""
+
+    band = difficulty_band(difficulty)
+    for _, _, label, hint in DIFFICULTY_BANDS:
+        if label == band:
+            return hint
+    raise AssertionError("Unreachable difficulty hint")
+
+
 @dataclass(frozen=True)
 class DiceResult:
     pool: int
