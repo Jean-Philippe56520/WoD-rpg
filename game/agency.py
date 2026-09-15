@@ -2,14 +2,15 @@
 
 L'opposition conserve ses règles historiques dans ``actions.py``. Ce module traite
 le cas plus subtil d'un allié interne : appartenir à la faction du Primogène ne
-signifie pas accepter n'importe quelle mission. Une faible relation, des griefs et
-une mission contraire à l'ambition personnelle peuvent provoquer un refus.
+signifie pas accepter n'importe quelle mission. Une faible relation, des griefs,
+l'ambition et désormais certaines impulsions de clan peuvent provoquer un refus.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
+from .clan_identity import brujah_rebellion_refusal
 from .config import DEFAULT_RULES, GameRules
 from .factions import effective_relation_to_primogen
 from .models import (
@@ -79,14 +80,7 @@ def mission_alignment(state: GameState, action: GameAction, actor_id: str) -> in
 
 
 def evaluate_member_mission(state: GameState, action: GameAction) -> AgencyDecision | None:
-    """Retourne une décision uniquement pour un allié interne non-Primogène.
-
-    ``None`` signifie que ce module ne s'applique pas : Primogène, ordre legacy ou
-    membre d'opposition (géré par les règles historiques). Les membres très proches
-    du Primogène obéissent ; une mission directement utile à leur ambition est aussi
-    acceptée. Le refus exige donc une vraie combinaison politique, pas un simple
-    mauvais score relationnel.
-    """
+    """Retourne une décision uniquement pour un allié interne non-Primogène."""
 
     if action.actor_character_id is None:
         return None
@@ -110,6 +104,19 @@ def evaluate_member_mission(state: GameState, action: GameAction) -> AgencyDecis
         return AgencyDecision(True, alignment, relation, grievances, "forte relation au Primogène")
     if alignment > 0:
         return AgencyDecision(True, alignment, relation, grievances, "mission conforme à son ambition")
+
+    if (
+        relation <= 1
+        and alignment <= 0
+        and brujah_rebellion_refusal(actor, action)
+    ):
+        return AgencyDecision(
+            False,
+            alignment,
+            relation,
+            grievances,
+            "la Faim attise sa Rébellion Brujah contre une mission de retenue ou de compromis",
+        )
 
     refuses = False
     reason = "autorité suffisante"
@@ -165,4 +172,6 @@ def member_reliability(state: GameState, character_id: str) -> str:
         return "forte"
     if relation <= 0 or grievances >= 2:
         return "faible"
+    if character.clan_id == "brujah" and character.hunger >= 4 and relation <= 1:
+        return "conditionnelle"
     return "conditionnelle"
