@@ -1,7 +1,7 @@
 from __future__ import annotations
 
+from .coteries import initialize_coteries
 from .domains import initialize_domains
-from .factions import initialize_factions
 from .models import (
     BloodRank,
     Candidate,
@@ -249,7 +249,7 @@ def create_initial_game_state() -> GameState:
         ),
     }
     state = GameState(characters=characters, clan_states=clan_states)
-    initialize_factions(state)
+    initialize_coteries(state)
     initialize_domains(state)
     generate_requests_for_night(state)
     return state

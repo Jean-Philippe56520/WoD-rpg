@@ -4,6 +4,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any
 
+from .coteries import initialize_coteries
 from .models import ClanNightOrders, ClanNightReport, GameState
 
 
@@ -97,7 +98,9 @@ class RuntimeGameRepository:
         self.delegate.ensure_game(target, target_name, state, required_clans)
 
     def get_game_state(self, game_id: str) -> GameState:
-        return self.delegate.get_game_state(self._game_id(game_id))
+        state = self.delegate.get_game_state(self._game_id(game_id))
+        initialize_coteries(state)
+        return state
 
     def get_game_info(self, game_id: str) -> dict:
         return self.delegate.get_game_info(self._game_id(game_id))
@@ -118,7 +121,10 @@ class RuntimeGameRepository:
         return self.delegate.submission_statuses(self._game_id(game_id))
 
     def try_begin_resolution(self, game_id: str):
-        return self.delegate.try_begin_resolution(self._game_id(game_id))
+        bundle = self.delegate.try_begin_resolution(self._game_id(game_id))
+        if bundle is not None:
+            initialize_coteries(bundle.state)
+        return bundle
 
     def abort_resolution(self, game_id: str, night: int) -> None:
         self.delegate.abort_resolution(self._game_id(game_id), night)

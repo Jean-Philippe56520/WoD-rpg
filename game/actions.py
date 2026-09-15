@@ -2,6 +2,15 @@ from __future__ import annotations
 
 from .character_rules import attribute_value, has_expertise
 from .config import DEFAULT_RULES, GameRules
+from .coteries import (
+    coterie_conflict_penalty,
+    coterie_cooperation_bonus,
+    hostile_coterie_target_id,
+    initialize_coteries,
+    shared_coterie,
+    should_refuse_coterie_conflict,
+    strain_coterie_bond,
+)
 from .domains import (
     has_hunting_access,
     intrusion_detected,
@@ -12,7 +21,6 @@ from .domains import (
 from .factions import (
     effective_relation_to_primogen,
     ideology_relation_modifier,
-    initialize_factions,
     set_faction_side,
 )
 from .models import (
@@ -172,7 +180,11 @@ def _opposition_accepts(state: GameState, action: GameAction, actor: Character) 
         return True
     if action.action_type == ActionType.DIPLOMACY:
         target = _diplomacy_target(state, action)
-        return ideology_relation_modifier(actor, target) >= 0
+        return (
+            ideology_relation_modifier(actor, target)
+            + coterie_cooperation_bonus(state, actor.id, target.id)
+            >= 0
+        )
     return False
 
 
@@ -194,6 +206,21 @@ def _opposition_refusal_event(
     )
 
 
+def _coterie_refusal_event(state: GameState, action: GameAction, actor: Character) -> GameEvent:
+    target_id = hostile_coterie_target_id(state, action)
+    target = state.characters.get(target_id or "")
+    coterie = shared_coterie(actor.id, target.id) if target else None
+    return GameEvent(
+        night=state.night,
+        category="coterie",
+        message=(
+            f"{actor.name} refuse d'agir contre {target.name if target else 'un compagnon'} : "
+            f"sa loyauté envers {coterie.name if coterie else 'sa coterie'} l'emporte sur l'ordre du Primogène."
+        ),
+        audience_clan_ids=(action.clan_id,),
+    )
+
+
 def _detected_domain_audience(state: GameState, acting_clan_id: str, holder_id: str | None):
     clans = {acting_clan_id}
     holder = state.characters.get(holder_id or "")
@@ -210,11 +237,16 @@ def apply_action(
     if action.clan_id not in state.clan_states:
         raise ValueError(f"Unknown clan: {action.clan_id}")
 
-    initialize_factions(state)
+    initialize_coteries(state)
     clan_state = state.clan_states[action.clan_id]
     clan = clan_state.clan
     actor = _resolve_actor(state, action)
     audience_clan_ids: tuple[str, ...] | None = (action.clan_id,)
+
+    if action.actor_character_id is not None and should_refuse_coterie_conflict(
+        state, action, actor.id
+    ):
+        return _coterie_refusal_event(state, action, actor)
 
     if action.actor_character_id is not None and not _opposition_accepts(state, action, actor):
         return _opposition_refusal_event(state, action, actor, rules)
@@ -233,13 +265,14 @@ def apply_action(
     elif action.action_type == ActionType.DIPLOMACY:
         target = _diplomacy_target(state, action)
         affinity = ideology_relation_modifier(actor, target)
+        coterie_bonus = coterie_cooperation_bonus(state, actor.id, target.id)
         score = _political_score(
             actor,
             CharacterAttribute.SOCIAL,
             expertises=("Diplomatie", "Politique", "Subterfuge"),
             backgrounds=("Contacts", "Influence politique", "Milieu artistique", "Influence syndicale"),
             disciplines=("presence", "domination"),
-        ) + affinity
+        ) + affinity + coterie_bonus
         gain = max(rules.diplomacy_minimum_gain, rules.diplomacy_gain + score)
         target_clan_id = target.clan_id
         if not target_clan_id:
@@ -251,10 +284,11 @@ def apply_action(
         if score >= rules.relation_action_threshold:
             actor.relations[target.id] = _clamp_int(actor.relations.get(target.id, 0) + 1)
             target.relations[actor.id] = _clamp_int(target.relations.get(actor.id, 0) + 1)
+        coterie_note = f", lien de coterie +{coterie_bonus}" if coterie_bonus else ""
         message = (
             f"{actor.name} négocie avec {target.name} : relation {clan.name}/"
             f"{state.clan_states[target_clan_id].clan.name} +{gain:.0f} "
-            f"(affinité politique {affinity:+d})."
+            f"(affinité politique {affinity:+d}{coterie_note})."
         )
 
     elif action.action_type == ActionType.CONSOLIDATE_RELATION:
@@ -317,22 +351,25 @@ def apply_action(
         if not target.clan_id or target.id == state.clan_states[target.clan_id].clan.primogen_id:
             raise ValueError("Undermining must target a non-Primogen clan member")
         affinity = ideology_relation_modifier(actor, target)
+        conflict_penalty = coterie_conflict_penalty(state, actor.id, target.id)
         score = _political_score(
             actor,
             CharacterAttribute.SOCIAL,
             expertises=("Subterfuge", "Politique", "Intimidation"),
             backgrounds=("Contacts", "Influence politique", "Rue"),
             disciplines=("presence", "domination"),
-        ) + affinity
+        ) + affinity - conflict_penalty
         difficulty = rules.undermine_base_difficulty + max(
             0, effective_relation_to_primogen(state, target.id)
         )
         if score >= difficulty and target.relation_to_primogen > 0:
             before = target.relation_to_primogen
             target.relation_to_primogen -= 1
+            coterie_name = strain_coterie_bond(state, actor.id, target.id)
+            coterie_note = f" Leur lien au sein de {coterie_name} se dégrade." if coterie_name else ""
             message = (
                 f"{actor.name} fragilise la confiance de {target.name} envers son Primogène : "
-                f"relation {before} → {target.relation_to_primogen}."
+                f"relation {before} → {target.relation_to_primogen}.{coterie_note}"
             )
         else:
             message = f"{actor.name} tente de fragiliser {target.name}, sans effet politique durable."
@@ -347,37 +384,45 @@ def apply_action(
         if effective_relation_to_primogen(state, target.id) > 0:
             raise ValueError("Target is not politically fragile enough to be poached")
         affinity = ideology_relation_modifier(actor, target)
+        conflict_penalty = coterie_conflict_penalty(state, actor.id, target.id)
         score = _political_score(
             actor,
             CharacterAttribute.SOCIAL,
             expertises=("Subterfuge", "Politique", "Diplomatie"),
             backgrounds=("Contacts", "Influence politique", "Alliés"),
             disciplines=("presence", "domination"),
-        ) + affinity
+        ) + affinity - conflict_penalty
         if score >= rules.poach_base_difficulty:
             set_faction_side(state, target.id, ClanFactionSide.OPPOSITION)
             actor.relations[target.id] = _clamp_int(actor.relations.get(target.id, 0) + 1)
-            message = f"{actor.name} convainc {target.name} de rejoindre l'opposition de son clan."
+            coterie_name = strain_coterie_bond(state, actor.id, target.id)
+            coterie_note = f" La manœuvre crée une tension dans {coterie_name}." if coterie_name else ""
+            message = (
+                f"{actor.name} convainc {target.name} de rejoindre l'opposition de son clan."
+                f"{coterie_note}"
+            )
         else:
             message = f"{actor.name} tente de débaucher {target.name}, sans provoquer de défection."
 
     elif action.action_type == ActionType.INVESTIGATE:
         target = _investigation_target(state, action)
+        coterie_bonus = coterie_cooperation_bonus(state, actor.id, target.id)
         score = _political_score(
             actor,
             CharacterAttribute.MENTAL,
             expertises=("Investigation", "Subterfuge", "Technologie"),
             backgrounds=("Contacts", "Rue"),
             disciplines=("auspex",),
-        )
+        ) + coterie_bonus
         difficulty = rules.investigation_base_difficulty + target.mental
         if has_expertise(target, "Subterfuge"):
             difficulty += 1
         before = clan_state.known_character_intel.get(target.id, 0)
         if score >= difficulty:
             clan_state.known_character_intel[target.id] = min(rules.max_intel_level, before + 1)
+            coterie_note = " grâce à ses accès de coterie" if coterie_bonus else ""
             message = (
-                f"{actor.name} obtient de nouveaux renseignements sur {target.name} : "
+                f"{actor.name} obtient de nouveaux renseignements sur {target.name}{coterie_note} : "
                 f"niveau {before} → {clan_state.known_character_intel[target.id]}."
             )
         else:
@@ -429,13 +474,17 @@ def apply_action(
         domain = _resolve_target_domain(state, action)
         if domain.holder_id == actor.id:
             raise ValueError("A holder cannot infiltrate their own Domain")
+        holder = state.characters.get(domain.holder_id or "")
+        conflict_penalty = (
+            coterie_conflict_penalty(state, actor.id, holder.id) if holder else 0
+        )
         score = _political_score(
             actor,
             CharacterAttribute.MENTAL,
             expertises=("Investigation", "Subterfuge", "Technologie", "Rue"),
             backgrounds=("Contacts", "Rue"),
             disciplines=("auspex",),
-        )
+        ) - conflict_penalty
         detected = intrusion_detected(domain, score)
         if not detected:
             before = clan_state.known_domain_intel.get(domain.id, 0)
@@ -445,7 +494,6 @@ def apply_action(
                 f"territorial : niveau {before} → {clan_state.known_domain_intel[domain.id]}."
             )
         else:
-            holder = state.characters.get(domain.holder_id or "")
             if holder:
                 open_domain_dispute(
                     state,
@@ -463,22 +511,28 @@ def apply_action(
                     severity=1,
                 )
             audience_clan_ids = _detected_domain_audience(state, action.clan_id, domain.holder_id)
+            coterie_name = strain_coterie_bond(state, actor.id, holder.id) if holder else None
+            coterie_note = f" La confiance au sein de {coterie_name} est atteinte." if coterie_name else ""
             message = (
                 f"L'intrusion de {actor.name} sur {domain.name} est repérée par son Rempart. "
-                "Un litige territorial est ouvert."
+                f"Un litige territorial est ouvert.{coterie_note}"
             )
 
     elif action.action_type == ActionType.BRACONNAGE:
         domain = _resolve_target_domain(state, action)
         if has_hunting_access(state, actor.id, domain.id):
             raise ValueError("A vampire with hunting access is not braconning")
+        holder = state.characters.get(domain.holder_id or "")
+        conflict_penalty = (
+            coterie_conflict_penalty(state, actor.id, holder.id) if holder else 0
+        )
         score = _political_score(
             actor,
             CharacterAttribute.SOCIAL,
             expertises=("Rue", "Subterfuge", "Intimidation"),
             backgrounds=("Contacts", "Rue"),
             disciplines=("presence", "celerite"),
-        )
+        ) - conflict_penalty
         success = score >= 2
         detected = intrusion_detected(domain, score)
         if success:
@@ -490,7 +544,6 @@ def apply_action(
         else:
             message = f"{actor.name} tente de braconner sur {domain.name}, sans accès exploitable."
         if detected:
-            holder = state.characters.get(domain.holder_id or "")
             if holder:
                 open_domain_dispute(
                     state,
@@ -508,7 +561,10 @@ def apply_action(
                     severity=1,
                 )
             audience_clan_ids = _detected_domain_audience(state, action.clan_id, domain.holder_id)
+            coterie_name = strain_coterie_bond(state, actor.id, holder.id) if holder else None
             message += " Le Rempart du Domaine révèle l'intrusion et ouvre un litige territorial."
+            if coterie_name:
+                message += f" La trahison fragilise {coterie_name}."
         else:
             message += " Le Rempart ne révèle pas l'auteur."
 

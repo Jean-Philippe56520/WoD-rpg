@@ -16,6 +16,7 @@ from game.browser_session import (
     persist_device_refresh_token,
     read_device_refresh_token,
 )
+from game.coterie_ui import render_coteries_panel
 from game.runtime import (
     PRODUCTION_GAME_ID,
     PRODUCTION_MODE,
@@ -127,6 +128,7 @@ mode = st.sidebar.radio(
     format_func=lambda value: "Chronique" if value == PRODUCTION_MODE else "Atelier (test/dev)",
     key="wod_runtime_mode_selector",
 )
+st.sidebar.caption("Moteur V0.11 — coteries et loyautés croisées")
 set_runtime_mode(mode)
 
 try:
@@ -182,3 +184,10 @@ try:
     exec(compile(ui_path.read_text(encoding="utf-8"), str(ui_path), "exec"), globals(), globals())
 finally:
     repository_factory.create_repository = _ORIGINAL_CREATE_REPOSITORY
+
+# La V0.11 ajoute sa vue sans dupliquer la grande interface historique. Les
+# variables ``state`` et ``player_clan`` sont créées par game_ui uniquement après
+# authentification/attribution du clan ; en lobby ou lors d'un st.stop, ce bloc
+# n'est donc pas exécuté.
+if "state" in globals() and "player_clan" in globals() and player_clan:
+    render_coteries_panel(state, player_clan)
