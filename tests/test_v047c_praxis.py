@@ -69,12 +69,17 @@ def _assigned_praxis_situation(character, simulation):
     raise AssertionError("Praxis hook was not assigned to a significant night")
 
 
-def test_initial_alexandre_praxis_is_not_automatically_a_crisis(tmp_path):
+def test_initial_alexandre_praxis_is_contested_by_the_audited_1435_context(tmp_path):
     _, character, _, simulation = _state(tmp_path)
     assessment = assess_praxis_pressure(simulation, (character,))
+    beat = praxis_pressure_beat(simulation, (character,))
+
     assert assessment.prince_id == "npc_alexandre"
-    assert assessment.level in {"stable", "strained"}
-    assert praxis_pressure_beat(simulation, (character,)) is None
+    assert assessment.level == "contested"
+    assert character.character_id not in assessment.player_candidate_ids
+    assert any("Cour des Miracles" in reason for reason in assessment.reasons)
+    assert beat is not None
+    assert beat.category == "praxis_pressure"
 
 
 def test_persistent_hostility_domain_pressure_and_debts_can_make_praxis_critical(tmp_path):
@@ -142,8 +147,9 @@ def test_clean_critical_claim_can_transfer_praxis_but_normal_button_is_never_exp
     assert "Praxis reconnue" in result.resolution.outcome.detail
 
 
-def test_claim_is_not_available_while_world_state_is_only_strained(tmp_path):
+def test_claim_is_not_available_when_historical_crisis_pressure_is_absent(tmp_path):
     _, character, _, simulation = _state(tmp_path)
+    simulation = replace(simulation, year=1436)
     claimant = replace(character, status=3, personal_influence=6.0, chapter=1, segment=2)
     assessment = assess_praxis_pressure(simulation, (claimant,))
     assert not assessment.is_critical
