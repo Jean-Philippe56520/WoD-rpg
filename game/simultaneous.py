@@ -11,6 +11,7 @@ from collections import defaultdict
 from copy import deepcopy
 
 from .actions import apply_action
+from .agency import apply_member_refusal, evaluate_member_mission
 from .config import DEFAULT_RULES, GameRules
 from .coteries import initialize_coteries
 from .domains import open_domain_dispute
@@ -25,8 +26,6 @@ def _clamp(value: int, minimum: int, maximum: int) -> int:
 
 
 def _action_key(action: GameAction) -> tuple[str, str, str, str, str, str]:
-    """Ordre d'affichage stable uniquement ; il ne modifie pas les calculs."""
-
     return (
         action.clan_id,
         action.actor_character_id or "",
@@ -69,8 +68,6 @@ def resolve_actions_simultaneously(
     actions: list[GameAction],
     rules: GameRules = DEFAULT_RULES,
 ) -> list[GameEvent]:
-    """Évalue toutes les actions sur un snapshot puis applique leurs effets cumulés."""
-
     if not actions:
         return []
 
@@ -93,9 +90,15 @@ def resolve_actions_simultaneously(
 
     for action in sorted(actions, key=_action_key):
         trial = deepcopy(baseline)
-        event = apply_action(trial, action, rules)
+        agency = evaluate_member_mission(trial, action)
+        if agency is not None and not agency.obeys:
+            event = apply_member_refusal(trial, action, agency, rules)
+        else:
+            event = apply_action(trial, action, rules)
 
         if (
+            agency is None or agency.obeys
+        ) and (
             action.action_type == ActionType.BRACONNAGE
             and action.target_domain_id in baseline.domains
             and trial.domains[action.target_domain_id].pressure
@@ -116,11 +119,9 @@ def resolve_actions_simultaneously(
             )
         events.append(event)
 
-        # Une enquête réellement réussie produit également un renseignement imparfait.
-        # La rumeur est basée sur le même snapshot que les autres missions et devient
-        # persistante lorsque les événements retournés sont ajoutés à l'historique.
         if (
-            action.action_type == ActionType.INVESTIGATE
+            (agency is None or agency.obeys)
+            and action.action_type == ActionType.INVESTIGATE
             and "obtient de nouveaux renseignements" in event.message
         ):
             subject_id = _investigation_subject(baseline, action)
