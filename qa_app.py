@@ -32,16 +32,34 @@ def _database_path(scenario_id: str) -> Path:
     return qa_default_database_path(scenario_id).expanduser().resolve()
 
 
+def _apptest_safe_radio(original_radio):
+    """Adapt formatted radios for Streamlit AppTest without changing engine values.
+
+    AppTest serializes rendered option labels. The production view intentionally
+    returns stable choice ids through ``format_func``. In QA, expose the labels
+    as the widget values and map the selected label back to the original id.
+    """
+
+    def radio(label, options, *args, format_func=None, **kwargs):
+        raw_options = list(options)
+        if format_func is None:
+            return original_radio(label, raw_options, *args, **kwargs)
+        rendered_options = [format_func(value) for value in raw_options]
+        selected_label = original_radio(label, rendered_options, *args, **kwargs)
+        return raw_options[rendered_options.index(selected_label)]
+
+    return radio
+
+
 st.sidebar.error("ENVIRONNEMENT QA ISOLÉ — aucune écriture Supabase")
-scenario_id = st.sidebar.selectbox(
+scenario_by_label = {scenario.label: scenario for scenario in QA_SCENARIOS}
+scenario_label = st.sidebar.selectbox(
     "Scénario QA",
-    options=[scenario.id for scenario in QA_SCENARIOS],
-    format_func=lambda value: next(
-        scenario.label for scenario in QA_SCENARIOS if scenario.id == value
-    ),
+    options=list(scenario_by_label),
     key="qa_scenario_selector",
 )
-scenario = next(item for item in QA_SCENARIOS if item.id == scenario_id)
+scenario = scenario_by_label[scenario_label]
+scenario_id = scenario.id
 database_path = _database_path(scenario_id)
 
 st.sidebar.caption(scenario.description)
@@ -67,9 +85,14 @@ st.caption(
 with st.expander("État QA brut", expanded=False):
     st.json(qa_snapshot(repository, scenario_id))
 
-render_chronicle_app(
-    repository,
-    player_id=qa_player_id(scenario_id),
-    player_name="QA automatisé",
-    backend_label="SQLite QA isolée",
-)
+_original_radio = st.radio
+st.radio = _apptest_safe_radio(_original_radio)
+try:
+    render_chronicle_app(
+        repository,
+        player_id=qa_player_id(scenario_id),
+        player_name="QA automatisé",
+        backend_label="SQLite QA isolée",
+    )
+finally:
+    st.radio = _original_radio
