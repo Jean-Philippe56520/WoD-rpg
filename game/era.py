@@ -19,6 +19,11 @@ class EraRules:
     A Prince, a council of elders, or a clan representative may exist before the
     Camarilla, but the engine must not present late-Camarilla institutions as if
     they were already standardized everywhere in 1435.
+
+    ``masquerade_codified`` means that the later Camarilla legal framing is
+    established in the campaign model. It does *not* mean that pre-1493 Caïnites
+    are free to reveal themselves: fear of hunters and concealment practices are
+    already existential well before formal institutional consolidation.
     """
 
     year: int
@@ -62,8 +67,9 @@ MILESTONES: tuple[HistoricalMilestone, ...] = (
         id="camarilla_consolidation",
         title="La coalition se structure",
         public_text=(
-            "Les réseaux qui se réclament du nouvel ordre coordonnent davantage leurs décisions. "
-            "Les usages locaux demeurent puissants, mais les pressions en faveur de règles communes augmentent."
+            "Les réseaux du nouvel ordre coordonnent davantage leurs décisions et la dissimulation face aux "
+            "mortels devient une exigence politique de plus en plus ferme. Les usages locaux demeurent puissants "
+            "et les futures institutions ne sont pas encore uniformes."
         ),
     ),
     HistoricalMilestone(
@@ -96,7 +102,8 @@ def era_for_year(year: int) -> EraRules:
             available_offices=("none", "domain_holder", "clan_envoy", "prince"),
             public_context=(
                 "Les Caïnites vivent sous des coutumes locales, des lignages, des serments et la force réelle "
-                "des seigneurs nocturnes. La révolte contre les anciens fracture déjà de nombreuses régions."
+                "des seigneurs nocturnes. La révolte contre les anciens fracture déjà de nombreuses régions et "
+                "les chasseurs rendent la discrétion vitale."
             ),
         )
     if year < 1486:
@@ -114,8 +121,9 @@ def era_for_year(year: int) -> EraRules:
             high_low_clan_order_relevant=True,
             available_offices=("none", "domain_holder", "clan_envoy", "prince"),
             public_context=(
-                "Un projet de coalition entre anciens gagne des soutiens, sans constituer encore un gouvernement "
-                "universel. Princes, conseils d'anciens, lignages et coutumes locales restent déterminants."
+                "La Camarilla vient d'être annoncée comme projet de coalition, sans constituer encore un gouvernement "
+                "universel. Princes, conseils d'anciens, lignages et coutumes locales restent déterminants, tandis que "
+                "la peur des chasseurs pousse déjà les Caïnites à renforcer leur dissimulation."
             ),
         )
     if year < 1493:
@@ -133,8 +141,9 @@ def era_for_year(year: int) -> EraRules:
             high_low_clan_order_relevant=True,
             available_offices=("none", "domain_holder", "clan_envoy", "prince"),
             public_context=(
-                "La coalition devient plus visible et tente d'harmoniser les pratiques, mais aucune ville ne doit "
-                "être supposée appliquer mécaniquement les institutions de la Camarilla moderne."
+                "La coalition devient plus visible, coordonne davantage ses membres et exige une dissimulation "
+                "croissante face aux mortels. Cela ne signifie pas encore que chaque ville applique mécaniquement "
+                "le Conseil des Primogènes ou les institutions de la Camarilla moderne."
             ),
         )
     return EraRules(
