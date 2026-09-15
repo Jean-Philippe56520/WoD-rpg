@@ -517,6 +517,11 @@ class ActionType(str, Enum):
     DOMAIN_INTRUSION = "domain_intrusion"
     BRACONNAGE = "braconnage"
     CHALLENGE_PRAXIS = "challenge_praxis"
+    CRISIS_INVESTIGATE = "crisis_investigate"
+    CRISIS_INFILTRATE = "crisis_infiltrate"
+    CRISIS_NEGOTIATE = "crisis_negotiate"
+    CRISIS_CONTAIN = "crisis_contain"
+    CRISIS_EXPLOIT = "crisis_exploit"
     # Legacy order values accepted for already-submitted V0.7 nights.
     CONSOLIDATE = "consolidate"
     RALLY_OPPOSITION = "rally_opposition"
