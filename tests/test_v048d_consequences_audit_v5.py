@@ -1,4 +1,5 @@
 from dataclasses import replace
+from types import SimpleNamespace
 
 from game.chronicle import (
     CHRONICLE_GAME_ID,
@@ -51,6 +52,24 @@ def test_gradation_couvre_reussites_et_echecs():
     assert degre_issue(_des(successes=2, difficulty=3)) == DegreIssue.ECHEC_LIMITE
     assert degre_issue(_des(successes=1, difficulty=3)) == DegreIssue.ECHEC_SERIEUX
     assert degre_issue(_des(successes=0, difficulty=4)) == DegreIssue.ECHEC_GRAVE
+
+
+def test_gradation_accepte_les_anciens_doubles_sans_marge():
+    echec = SimpleNamespace(
+        success=False,
+        bestial_failure=False,
+        critical=False,
+        messy_critical=False,
+    )
+    reussite = SimpleNamespace(
+        success=True,
+        bestial_failure=False,
+        critical=False,
+        messy_critical=False,
+    )
+
+    assert degre_issue(echec) == DegreIssue.ECHEC_SERIEUX
+    assert degre_issue(reussite) == DegreIssue.REUSSITE_NETTE
 
 
 def test_echec_social_grave_use_plus_la_volonte_qu_un_echec_limite():
