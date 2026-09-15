@@ -3,19 +3,25 @@ from game.ideology import (
     character_affinity,
     character_current_id,
     clan_total_influence,
-    ideological_affinity_values,
+    ideological_affinity_axes,
+    quadrant_for_axes,
     quadrant_for_values,
     shift_ideology,
 )
-from game.models import IdeologyQuadrant
+from game.models import AxisPolarity, IdeologyQuadrant
 from game.world import create_initial_game_state
 
 
-def test_four_ideology_quadrants_are_derived_from_axes():
-    assert quadrant_for_values(10, 10) == IdeologyQuadrant.HUMANIST_TRADITIONAL
-    assert quadrant_for_values(10, -10) == IdeologyQuadrant.HUMANIST_REFORMIST
-    assert quadrant_for_values(-10, 10) == IdeologyQuadrant.PREDATORY_TRADITIONAL
-    assert quadrant_for_values(-10, -10) == IdeologyQuadrant.PREDATORY_RADICAL
+def test_four_ideology_quadrants_are_derived_from_binary_axes():
+    assert quadrant_for_axes("+", "+") == IdeologyQuadrant.HUMANIST_TRADITIONAL
+    assert quadrant_for_axes("+", "-") == IdeologyQuadrant.HUMANIST_REFORMIST
+    assert quadrant_for_axes("-", "+") == IdeologyQuadrant.PREDATORY_TRADITIONAL
+    assert quadrant_for_axes("-", "-") == IdeologyQuadrant.PREDATORY_RADICAL
+
+
+def test_legacy_numeric_axes_are_still_readable():
+    assert quadrant_for_values(60, -65) == IdeologyQuadrant.HUMANIST_REFORMIST
+    assert quadrant_for_values(-50, 70) == IdeologyQuadrant.PREDATORY_TRADITIONAL
 
 
 def test_toreador_initially_exposes_all_four_possible_currents():
@@ -34,13 +40,13 @@ def test_current_influence_is_derived_from_member_influence():
     assert clan_total_influence(state, "ventrue") == 72
 
 
-def test_ideological_affinity_ranges_from_identical_to_opposite():
-    assert ideological_affinity_values(50, -40, 50, -40) == 100
-    assert ideological_affinity_values(100, 100, -100, -100) == -100
-    assert ideological_affinity_values(50, 50, 50, -50) == 50
+def test_ideological_affinity_rewards_same_or_neighboring_currents():
+    assert ideological_affinity_axes("+", "-", "+", "-") == 100
+    assert ideological_affinity_axes("+", "+", "+", "-") == 50
+    assert ideological_affinity_axes("+", "+", "-", "-") == -100
 
 
-def test_character_affinity_uses_both_axes():
+def test_character_affinity_uses_both_binary_axes():
     state = create_initial_game_state()
     claire = state.characters["ventrue_claire"]
     lucien = state.characters["toreador_lucien"]
@@ -48,14 +54,18 @@ def test_character_affinity_uses_both_axes():
     assert character_affinity(claire, lucien) > character_affinity(claire, adrien)
 
 
-def test_crossing_an_axis_moves_character_to_another_current_without_changing_humanity():
+def test_changing_one_axis_moves_character_to_another_current():
     state = create_initial_game_state()
     claire = state.characters["ventrue_claire"]
-    humanity_before = claire.humanity
     before = character_current_id(claire)
-    previous, after = shift_ideology(state, claire.id, humanism_delta=-80)
+    previous, after = shift_ideology(
+        state,
+        claire.id,
+        humanity_axis=AxisPolarity.MINUS,
+    )
     assert previous == before
     assert after == "ventrue__predatory_radical"
-    assert claire.humanity == humanity_before
+    assert claire.humanity_axis == AxisPolarity.MINUS
+    assert claire.tradition_axis == AxisPolarity.MINUS
     assert after in build_currents(state, "ventrue")
     assert after in state.clan_states["ventrue"].current_allies
