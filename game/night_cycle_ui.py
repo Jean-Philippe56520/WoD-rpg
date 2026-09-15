@@ -7,8 +7,14 @@ from .chronicle_politics import primary_office
 from .chronicle_service import ChronicleService, chronicle_time_label, ellipse_label
 from .chronicle_world_store import ChronicleWorldStore
 from .dice import difficulty_band
+from .mecaniques_vampiriques import (
+    bonus_coup_de_sang,
+    recuperer_volonte_fin_nuit,
+    usage_discipline,
+)
 from .night_cycle import (
     NightPhase,
+    OptionsResolution,
     available_situations,
     choose_night_event,
     free_action_situations,
@@ -82,40 +88,89 @@ def _situation_for_id(
 def _render_choice_form(
     situation,
     character,
+    profile,
     simulation,
     *,
     key_prefix: str,
     submit_label: str,
 ):
-    with st.form(f"{key_prefix}_{situation.id}"):
-        choice_id = st.radio(
-            "Votre décision",
-            options=[choice.id for choice in situation.choices],
-            format_func=lambda value: next(
-                choice.label for choice in situation.choices if choice.id == value
-            ),
-            key=f"{key_prefix}_choice_{situation.id}",
+    choice_id = st.radio(
+        "Votre décision",
+        options=[choice.id for choice in situation.choices],
+        format_func=lambda value: next(
+            choice.label for choice in situation.choices if choice.id == value
+        ),
+        key=f"{key_prefix}_choice_{situation.id}",
+    )
+    selected = next(choice for choice in situation.choices if choice.id == choice_id)
+    preview = action_risk_preview(character, simulation, situation, selected)
+    st.caption(selected.description)
+    st.caption(
+        f"Approche : {_label(ATTRIBUTE_LABELS, preview.attribute)} + "
+        f"{_label(SKILL_LABELS, preview.skill)} · Risque estimé : **{preview.band.title()}**"
+    )
+    st.caption(preview.hint)
+
+    with st.form(f"{key_prefix}_{situation.id}_{choice_id}"):
+        st.markdown("**Leviers vampiriques**")
+        usage = usage_discipline(profile, situation, selected)
+        if usage is not None:
+            utiliser_discipline = st.checkbox(
+                f"Utiliser {usage.discipline} — {usage.pouvoir} (+{usage.bonus_des} dé(s))",
+                key=f"{key_prefix}_discipline_{situation.id}_{choice_id}",
+            )
+            st.caption(usage.description)
+        else:
+            utiliser_discipline = False
+            st.caption(
+                "Aucun pouvoir de Discipline actuellement modélisé ne s'applique directement à cette approche."
+            )
+
+        bonus_sang = bonus_coup_de_sang(profile.blood_potency)
+        coup_indisponible = character.hunger >= 5
+        coup_de_sang = st.checkbox(
+            f"Coup de Sang (+{bonus_sang} dés, avec Test d’Exaltation)",
+            disabled=coup_indisponible,
+            key=f"{key_prefix}_coup_sang_{situation.id}_{choice_id}",
         )
-        selected = next(choice for choice in situation.choices if choice.id == choice_id)
-        preview = action_risk_preview(character, simulation, situation, selected)
-        st.caption(selected.description)
-        st.caption(
-            f"Approche : {_label(ATTRIBUTE_LABELS, preview.attribute)} + "
-            f"{_label(SKILL_LABELS, preview.skill)} · Risque estimé : **{preview.band.title()}**"
+        if coup_indisponible:
+            st.caption("Coup de Sang indisponible : la Faim est déjà à 5.")
+        else:
+            st.caption("Le Test d’Exaltation peut augmenter la Faim de 1.")
+
+        volonte_indisponible = profile.willpower <= 0
+        depenser_volonte = st.checkbox(
+            "Dépenser 1 Volonté pour relancer jusqu'à trois dés ordinaires en échec",
+            disabled=volonte_indisponible,
+            key=f"{key_prefix}_volonte_{situation.id}_{choice_id}",
         )
-        st.caption(preview.hint)
+        if volonte_indisponible:
+            st.caption("Aucun point de Volonté disponible.")
+        else:
+            st.caption("Les dés de Faim ne peuvent jamais être relancés par la Volonté.")
+
         free_intent = st.text_area(
             "Précision libre",
             placeholder="Votre manière d'agir, ce que vous cachez, ce que vous cherchez vraiment…",
             max_chars=500,
-            key=f"{key_prefix}_intent_{situation.id}",
+            key=f"{key_prefix}_intent_{situation.id}_{choice_id}",
         )
         submitted = st.form_submit_button(
             submit_label,
             type="primary",
             use_container_width=True,
         )
-    return submitted, choice_id, free_intent
+
+    return (
+        submitted,
+        choice_id,
+        free_intent,
+        OptionsResolution(
+            depenser_volonte=depenser_volonte,
+            coup_de_sang=coup_de_sang,
+            utiliser_discipline=utiliser_discipline,
+        ),
+    )
 
 
 def _step_notice(result) -> str:
@@ -144,7 +199,7 @@ def render_chronicle_header(character, profile, progress, simulation) -> None:
     vital1, vital2, vital3, vital4, vital5, vital6 = st.columns(6)
     vital1.metric("Faim", f"{character.hunger}/5")
     vital2.metric("Humanité", f"{character.humanity}/10")
-    vital3.metric("Volonté", profile.willpower)
+    vital3.metric("Volonté", f"{profile.willpower}/{profile.volonte_maximale}")
     vital4.metric("Statut", character.status)
     vital5.metric("Influence", f"{character.personal_influence:.1f}")
     vital6.metric("Expérience", character.experience)
@@ -288,9 +343,10 @@ def render_night_cycle(
                 st.caption("Écho du Cycle précédent — information imparfaite, issue d'un changement réel du monde.")
             st.markdown(f"#### {event.title}")
             st.write(event.body)
-            play, choice_id, free_intent = _render_choice_form(
+            play, choice_id, free_intent, options = _render_choice_form(
                 event,
                 character,
+                profile,
                 simulation,
                 key_prefix=(
                     f"night_event_{character.chapter}_{character.segment}_{character.local_night}"
@@ -306,6 +362,7 @@ def render_night_cycle(
                 choice_id,
                 nights_per_segment=progress.nights_per_segment,
                 free_intent=free_intent,
+                options=options,
             )
             night_store.apply_event(character, night_state, result)
             simulation_store.save(result.resolution.simulation)
@@ -351,9 +408,10 @@ def render_night_cycle(
             with st.container(border=True):
                 st.markdown(f"#### {situation.title}")
                 st.write(situation.body)
-                play, choice_id, free_intent = _render_choice_form(
+                play, choice_id, free_intent, options = _render_choice_form(
                     situation,
                     character,
+                    profile,
                     simulation,
                     key_prefix=(
                         f"free_action_{character.chapter}_{character.segment}_"
@@ -372,6 +430,7 @@ def render_night_cycle(
                     remaining_actions=night_state.remaining_actions,
                     action_index=free_action_count + 1,
                     free_intent=free_intent,
+                    options=options,
                 )
                 night_store.apply_free_action(character, night_state, result)
                 simulation_store.save(result.resolution.simulation)
@@ -397,14 +456,20 @@ def render_night_cycle(
             night_state,
             nights_per_segment=progress.nights_per_segment,
         )
-        st.session_state["wod_last_chronicle_notice"] = (
+        profil_recupere, recuperation = recuperer_volonte_fin_nuit(profile)
+        if recuperation > 0:
+            profile_store.save(profil_recupere)
+        notice = (
             f"La nuit {character.local_night} s'achève. Ses conséquences sont désormais inscrites dans la Chronique."
         )
+        if recuperation > 0:
+            notice += f" Vous récupérez {recuperation} point(s) de Volonté."
+        st.session_state["wod_last_chronicle_notice"] = notice
         st.rerun()
 
 
 def install_night_cycle_ui() -> None:
-    """Install the V0.48b Chronicle time, night and hidden-risk renderers."""
+    """Installe l'interface de Chronique V0.48c et ses leviers vampiriques."""
 
     from . import chronicle_ui
 

@@ -64,6 +64,8 @@ class VampireProfile:
     feeding_preference: str | None = None
     released_from_sire: bool = False
     schema_version: int = 2
+    # Bonus purement transitoire : jamais sérialisé dans une sauvegarde.
+    bonus_resolution: int = 0
 
     def __post_init__(self) -> None:
         if not 4 <= self.generation <= 16:
@@ -72,6 +74,8 @@ class VampireProfile:
             raise ValueError("Blood Potency must be between 0 and 10")
         if not 0 <= self.willpower <= 10:
             raise ValueError("Willpower must be between 0 and 10")
+        if not 0 <= self.bonus_resolution <= 10:
+            raise ValueError("Le bonus temporaire de résolution doit être compris entre 0 et 10")
         _validate_scores("attribute", self.attributes, ATTRIBUTE_NAMES, 1, 5)
         _validate_scores("skill", self.skills, SKILL_NAMES, 0, 5)
         for name, score in self.disciplines.items():
@@ -83,12 +87,24 @@ class VampireProfile:
         if not self.convictions:
             raise ValueError("At least one Conviction is required")
 
+    @property
+    def volonte_maximale(self) -> int:
+        """Volonté maximale V5 : Résolution + Sang-froid."""
+
+        return min(10, self.attributes["resolve"] + self.attributes["composure"])
+
     def pool(self, attribute: str, skill: str, *, bonus: int = 0) -> int:
         if attribute not in self.attributes:
             raise ValueError(f"Unknown attribute: {attribute}")
         if skill not in self.skills:
             raise ValueError(f"Unknown skill: {skill}")
-        return max(1, self.attributes[attribute] + self.skills[skill] + bonus)
+        return max(
+            1,
+            self.attributes[attribute]
+            + self.skills[skill]
+            + bonus
+            + self.bonus_resolution,
+        )
 
 
 def _validate_scores(
@@ -132,12 +148,7 @@ def _base_skills(clan_id: str) -> dict[str, int]:
 
 
 def default_profile(character: PlayerCharacter) -> VampireProfile:
-    """Create a backward-compatible profile for characters without one.
-
-    V0.40 makes Via Humanitatis the only player Road and removes Touchstones.
-    Existing characters keep their persisted JSON unchanged when it already
-    exists; this default is used only when a profile must be synthesized.
-    """
+    """Crée un profil rétrocompatible lorsqu'aucune fiche persistante n'existe."""
 
     sire_generation = SIRE_GENERATIONS.get(character.sire_id, 10)
     generation = min(16, sire_generation + 1)
@@ -145,13 +156,15 @@ def default_profile(character: PlayerCharacter) -> VampireProfile:
     feeding = None
     if character.clan_id == "ventrue":
         feeding = "Mortels appartenant à une condition sociale liée à votre ancienne vie"
+    attributes = _base_attributes(character.clan_id)
+    willpower = min(10, attributes["resolve"] + attributes["composure"])
     return VampireProfile(
         game_id=character.game_id,
         character_id=character.character_id,
         generation=generation,
         blood_potency=1,
-        willpower=4,
-        attributes=_base_attributes(character.clan_id),
+        willpower=willpower,
+        attributes=attributes,
         skills=_base_skills(character.clan_id),
         disciplines={discipline_key: 1},
         backgrounds={"sire": 1, "contacts": 1, "resources": 0, "status": 0},
@@ -169,13 +182,7 @@ def profile_for_creation(
     conviction_id: str,
     feeding_preference: str | None = None,
 ) -> VampireProfile:
-    """Build the V0.40 sheet from structured creation choices.
-
-    A Conviction has an immediate mechanical effect: it increases its linked
-    Skill by one dot (maximum 5). This compact rule is intentionally simple;
-    the later Humanity pass can add uphold/violation consequences without
-    requiring free-text interpretation.
-    """
+    """Construit la fiche structurée issue de la création de personnage."""
 
     conviction(conviction_id)
     profile = default_profile(character)
