@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 
 BONUS_COUP_DE_SANG = {
@@ -17,6 +17,15 @@ BONUS_COUP_DE_SANG = {
     10: 6,
 }
 
+ATTRIBUTS_MENTAUX_SOCIAUX = {
+    "charisma",
+    "manipulation",
+    "composure",
+    "intelligence",
+    "wits",
+    "resolve",
+}
+
 
 @dataclass(frozen=True)
 class UsageDiscipline:
@@ -30,6 +39,34 @@ def bonus_coup_de_sang(puissance_du_sang: int) -> int:
     if puissance_du_sang not in BONUS_COUP_DE_SANG:
         raise ValueError("Puissance du Sang hors plage prise en charge")
     return BONUS_COUP_DE_SANG[puissance_du_sang]
+
+
+def perte_volonte_apres_echec(choice, dice) -> int:
+    """Un revers mental ou social marqué inflige 1 point d'usure de Volonté."""
+
+    if dice.success:
+        return 0
+    if choice.attribute not in ATTRIBUTS_MENTAUX_SOCIAUX:
+        return 0
+    return 1 if dice.margin <= -2 else 0
+
+
+def recuperer_volonte_fin_nuit(profile) -> tuple[object, int]:
+    """Récupère l'usure superficielle entre deux Nuits significatives.
+
+    Le rythme asynchrone assimile une Nuit significative à une séance de jeu :
+    la récupération est donc plafonnée par le meilleur score entre Résolution
+    et Sang-froid, sans dépasser la Volonté maximale.
+    """
+
+    manque = max(0, profile.volonte_maximale - profile.willpower)
+    recuperation = min(
+        manque,
+        max(profile.attributes["resolve"], profile.attributes["composure"]),
+    )
+    if recuperation <= 0:
+        return profile, 0
+    return replace(profile, willpower=profile.willpower + recuperation), recuperation
 
 
 def _niveau(profile, nom: str) -> int:
