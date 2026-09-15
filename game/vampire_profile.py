@@ -4,7 +4,7 @@ from dataclasses import dataclass, field, replace
 from typing import Mapping
 
 from .chronicle import PlayerCharacter
-from .creation_rules import apply_conviction_skill_bonus, conviction
+from .creation_rules import conviction
 
 
 ATTRIBUTE_NAMES = (
@@ -19,66 +19,24 @@ ATTRIBUTE_NAMES = (
     "resolve",
 )
 
-# Identifiants V5 canoniques. Les libellés visibles sont adaptés à Paris 1435
-# (par exemple Firearms -> Tir, Drive -> Conduite & monte, Technology -> Techniques).
+# Identifiants V5 canoniques. Les libellés visibles sont adaptés à Paris 1435.
 SKILL_NAMES = (
-    "athletics",
-    "brawl",
-    "craft",
-    "drive",
-    "firearms",
-    "larceny",
-    "melee",
-    "stealth",
-    "survival",
-    "animal_ken",
-    "etiquette",
-    "insight",
-    "intimidation",
-    "leadership",
-    "performance",
-    "persuasion",
-    "streetwise",
-    "subterfuge",
-    "academics",
-    "awareness",
-    "finance",
-    "investigation",
-    "medicine",
-    "occult",
-    "politics",
-    "science",
-    "technology",
+    "athletics", "brawl", "craft", "drive", "firearms", "larceny", "melee", "stealth", "survival",
+    "animal_ken", "etiquette", "insight", "intimidation", "leadership", "performance", "persuasion",
+    "streetwise", "subterfuge", "academics", "awareness", "finance", "investigation", "medicine",
+    "occult", "politics", "science", "technology",
 )
 
 SKILL_LABELS_1435 = {
-    "athletics": "Athlétisme",
-    "brawl": "Bagarre",
-    "craft": "Artisanat",
-    "drive": "Conduite & monte",
-    "firearms": "Tir",
-    "larceny": "Larcin",
-    "melee": "Mêlée",
-    "stealth": "Furtivité",
-    "survival": "Survie",
-    "animal_ken": "Animaux",
-    "etiquette": "Étiquette",
-    "insight": "Intuition",
-    "intimidation": "Intimidation",
-    "leadership": "Commandement",
-    "performance": "Représentation",
-    "persuasion": "Persuasion",
-    "streetwise": "Bas-fonds",
-    "subterfuge": "Subterfuge",
-    "academics": "Érudition",
-    "awareness": "Vigilance",
-    "finance": "Commerce & comptes",
-    "investigation": "Investigation",
-    "medicine": "Médecine",
-    "occult": "Occultisme",
-    "politics": "Politique",
-    "science": "Sciences naturelles",
-    "technology": "Techniques",
+    "athletics": "Athlétisme", "brawl": "Bagarre", "craft": "Artisanat",
+    "drive": "Conduite & monte", "firearms": "Tir", "larceny": "Larcin",
+    "melee": "Mêlée", "stealth": "Furtivité", "survival": "Survie",
+    "animal_ken": "Animaux", "etiquette": "Étiquette", "insight": "Intuition",
+    "intimidation": "Intimidation", "leadership": "Commandement", "performance": "Représentation",
+    "persuasion": "Persuasion", "streetwise": "Bas-fonds", "subterfuge": "Subterfuge",
+    "academics": "Érudition", "awareness": "Vigilance", "finance": "Commerce & comptes",
+    "investigation": "Investigation", "medicine": "Médecine", "occult": "Occultisme",
+    "politics": "Politique", "science": "Sciences naturelles", "technology": "Techniques",
 }
 
 PHYSICAL_ATTRIBUTES = {"strength", "dexterity", "stamina"}
@@ -106,8 +64,7 @@ class VampireProfile:
     disciplines: dict[str, int] = field(default_factory=dict)
     backgrounds: dict[str, int] = field(default_factory=dict)
     convictions: tuple[str, ...] = ()
-    # Kept only for backward compatibility with V0.31-V0.39 JSON saves.
-    # New characters do not create or use Touchstones.
+    # Conservé uniquement pour lire les anciennes sauvegardes V0.31-V0.39.
     touchstones: tuple[str, ...] = ()
     road_affinity: str = "humanitatis"
     current_desire: str = ""
@@ -115,8 +72,9 @@ class VampireProfile:
     released_from_sire: bool = False
     health_superficial: int = 0
     health_aggravated: int = 0
-    schema_version: int = 3
-    # Bonus purement transitoire : jamais sérialisé dans une sauvegarde.
+    humanity_stains: int = 0
+    schema_version: int = 4
+    # Bonus transitoire, jamais sérialisé.
     bonus_resolution: int = 0
 
     def __post_init__(self) -> None:
@@ -126,6 +84,8 @@ class VampireProfile:
             raise ValueError("Blood Potency must be between 0 and 10")
         if not 0 <= self.willpower <= 10:
             raise ValueError("Willpower must be between 0 and 10")
+        if not 0 <= self.humanity_stains <= 10:
+            raise ValueError("Humanity Stains must be between 0 and 10")
         if not 0 <= self.bonus_resolution <= 10:
             raise ValueError("Le bonus temporaire de résolution doit être compris entre 0 et 10")
         _validate_scores("attribute", self.attributes, ATTRIBUTE_NAMES, 1, 5)
@@ -155,14 +115,10 @@ class VampireProfile:
 
     @property
     def volonte_maximale(self) -> int:
-        """Volonté maximale V5 : Résolution + Sang-froid."""
-
         return min(10, self.attributes["resolve"] + self.attributes["composure"])
 
     @property
     def sante_maximale(self) -> int:
-        """Santé V5 : Vigueur + 3."""
-
         return self.attributes["stamina"] + 3
 
     @property
@@ -175,8 +131,6 @@ class VampireProfile:
 
     @property
     def est_diminue(self) -> bool:
-        """Une piste de Santé remplie impose le malus d'altération physique V5."""
-
         return self.degats_sante >= self.sante_maximale
 
     @property
@@ -189,14 +143,7 @@ class VampireProfile:
         target = specialty.strip().casefold()
         return any(item.casefold() == target for item in self.specialties.get(skill, ()))
 
-    def pool(
-        self,
-        attribute: str,
-        skill: str,
-        *,
-        bonus: int = 0,
-        specialty: str | None = None,
-    ) -> int:
+    def pool(self, attribute: str, skill: str, *, bonus: int = 0, specialty: str | None = None) -> int:
         if attribute not in self.attributes:
             raise ValueError(f"Unknown attribute: {attribute}")
         if skill not in self.skills:
@@ -205,22 +152,12 @@ class VampireProfile:
         specialty_bonus = 1 if self.has_specialty(skill, specialty) else 0
         return max(
             1,
-            self.attributes[attribute]
-            + self.skills[skill]
-            + specialty_bonus
-            + bonus
-            + self.bonus_resolution
-            - impairment,
+            self.attributes[attribute] + self.skills[skill] + specialty_bonus + bonus
+            + self.bonus_resolution - impairment,
         )
 
 
-def _validate_scores(
-    label: str,
-    scores: Mapping[str, int],
-    allowed: tuple[str, ...],
-    minimum: int,
-    maximum: int,
-) -> None:
+def _validate_scores(label: str, scores: Mapping[str, int], allowed: tuple[str, ...], minimum: int, maximum: int) -> None:
     missing = set(allowed) - set(scores)
     extra = set(scores) - set(allowed)
     if missing or extra:
@@ -255,8 +192,6 @@ def _base_skills(clan_id: str) -> dict[str, int]:
 
 
 def _migrate_skills(raw: Mapping) -> dict[str, int]:
-    """Complète silencieusement les anciennes fiches V0.31-V0.48."""
-
     values = {name: 0 for name in SKILL_NAMES}
     for key, value in dict(raw).items():
         key = str(key)
@@ -270,10 +205,7 @@ def _migrate_specialties(raw: Mapping | None) -> dict[str, tuple[str, ...]]:
     for skill, items in dict(raw or {}).items():
         if str(skill) not in SKILL_NAMES:
             continue
-        if isinstance(items, str):
-            values = (items,)
-        else:
-            values = tuple(str(item) for item in items)
+        values = (items,) if isinstance(items, str) else tuple(str(item) for item in items)
         cleaned = tuple(item.strip() for item in values if item.strip())
         if cleaned:
             result[str(skill)] = cleaned
@@ -281,8 +213,6 @@ def _migrate_specialties(raw: Mapping | None) -> dict[str, tuple[str, ...]]:
 
 
 def default_profile(character: PlayerCharacter) -> VampireProfile:
-    """Crée un profil rétrocompatible lorsqu'aucune fiche persistante n'existe."""
-
     sire_generation = SIRE_GENERATIONS.get(character.sire_id, 10)
     generation = min(16, sire_generation + 1)
     discipline_key = character.starting_discipline.strip().lower()
@@ -309,6 +239,7 @@ def default_profile(character: PlayerCharacter) -> VampireProfile:
         feeding_preference=feeding,
         health_superficial=0,
         health_aggravated=0,
+        humanity_stains=0,
     )
 
 
@@ -318,16 +249,12 @@ def profile_for_creation(
     conviction_id: str,
     feeding_preference: str | None = None,
 ) -> VampireProfile:
-    """Construit la fiche structurée issue de la création de personnage."""
+    """Construit une fiche neuve sans l'ancienne règle maison +1 Compétence."""
 
     conviction(conviction_id)
     profile = default_profile(character)
-    # Le bonus de Compétence lié aux Convictions est encore conservé ici jusqu'à
-    # la passe Humanité/Flétrissures/Remords, afin de ne pas changer une règle
-    # joueur sans son remplacement moral et son affichage UI dans le même lot.
     return replace(
         profile,
-        skills=apply_conviction_skill_bonus(profile.skills, conviction_id),
         convictions=(conviction_id,),
         touchstones=(),
         road_affinity="humanitatis",
@@ -356,6 +283,7 @@ def profile_to_dict(profile: VampireProfile) -> dict:
         "released_from_sire": profile.released_from_sire,
         "health_superficial": profile.health_superficial,
         "health_aggravated": profile.health_aggravated,
+        "humanity_stains": profile.humanity_stains,
         "schema_version": profile.schema_version,
     }
 
@@ -376,11 +304,10 @@ def profile_from_dict(data: Mapping) -> VampireProfile:
         touchstones=tuple(str(item) for item in data.get("touchstones", ())),
         road_affinity=str(data.get("road_affinity", "humanitatis")),
         current_desire=str(data.get("current_desire", "")),
-        feeding_preference=(
-            str(data["feeding_preference"]) if data.get("feeding_preference") is not None else None
-        ),
+        feeding_preference=(str(data["feeding_preference"]) if data.get("feeding_preference") is not None else None),
         released_from_sire=bool(data.get("released_from_sire", False)),
         health_superficial=int(data.get("health_superficial", 0)),
         health_aggravated=int(data.get("health_aggravated", 0)),
-        schema_version=max(3, int(data.get("schema_version", 1))),
+        humanity_stains=int(data.get("humanity_stains", 0)),
+        schema_version=max(4, int(data.get("schema_version", 1))),
     )
