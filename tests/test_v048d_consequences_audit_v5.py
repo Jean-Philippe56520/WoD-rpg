@@ -145,9 +145,10 @@ def test_audit_v5_est_structure_et_identifie_les_lacunes_principales():
 
     assert report["total"] >= 30
     assert by_id["attributs"].statut == "intégré"
-    assert by_id["competences"].statut == "partiel"
-    assert by_id["specialites"].statut == "différé"
-    assert by_id["sante"].cible == "prioritaire"
+    assert by_id["competences"].statut == "intégré"
+    assert by_id["specialites"].statut == "intégré"
+    assert by_id["sante"].statut == "partiel"
+    assert by_id["guerison"].cible == "prioritaire"
     assert by_id["humanite"].cible == "prioritaire"
     assert by_id["historiques"].statut == "partiel"
     assert by_id["combat"].statut == "écarté"
