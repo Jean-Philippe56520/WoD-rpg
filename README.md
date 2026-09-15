@@ -89,6 +89,28 @@ Lors d'une convergence, les PNJ locaux peuvent désormais agir les uns sur les a
 
 Le monde ne se contente donc plus d'incrémenter un compteur abstrait. Le joueur arrive dans un réseau qui agit déjà sans lui.
 
+## V0.44 — mémoire relationnelle persistante
+
+Les PNJ peuvent maintenant conserver une mémoire structurée de leurs interactions avec le personnage joueur.
+
+Pour chaque PNJ concerné, le moteur suit notamment :
+
+- **disposition** : attitude générale envers le PJ ;
+- **confiance** : capacité à croire sa parole ou à compter sur lui ;
+- **respect** : poids accordé à ses décisions et à ses capacités ;
+- **crainte** : peur inspirée par ses actes ou par la Bête ;
+- **connaissance** : degré auquel le PNJ connaît réellement le personnage ;
+- **griefs** : passif hostile durable ;
+- **dernière interaction**.
+
+Cette mémoire n'est pas décorative. Une relation particulièrement favorable peut réduire la difficulté d'un futur échange social ; un passif hostile ou plusieurs griefs peuvent l'augmenter.
+
+Les actes visibles modifient la mémoire de l'interlocuteur réel : service au sire, négociation, refus, demande d'émancipation, prise de position politique, protection d'un intérêt, critique bestial ou échec bestial. Une chasse discrète n'est pas magiquement connue du détenteur d'un Domaine ; elle ne devient relationnelle que si elle laisse une trace suffisamment forte.
+
+Le journal détaillé des relations n'est pas une seconde base de données. Les interactions sont marquées dans l'historique canonique des nuits puis reconstruites pour l'interface **Mes liens**. De même, les Prestations restent dérivées du registre canonique des faveurs et ne sont jamais dupliquées dans la mémoire relationnelle.
+
+Les sauvegardes V0.43 restent compatibles : les dimensions relationnelles supplémentaires sont stockées dans les relations déjà sérialisées des PNJ. **Aucune migration de schéma Supabase n'est requise.** Le score historique `sire_relation` sert de baseline lorsque le sire ne dispose pas encore d'une mémoire détaillée.
+
 ## Canon divergent
 
 L'histoire réelle et la continuité Vampire constituent des **conditions initiales et des pressions**, pas un scénario verrouillé.
@@ -128,6 +150,8 @@ Décision du joueur
         |
 Jet de dés / Faim / conséquences
         |
+Mémoire des acteurs réellement impliqués
+        |
 Modification du personnage et du monde
         |
 Nuit suivante
@@ -155,18 +179,19 @@ L'identifiant de partie est dérivé de manière déterministe du compte sans ex
 
 Les anciennes sauvegardes V0.21–V0.41 stockées dans `chronicle_1435` sont migrées de manière non destructive vers une instance personnelle.
 
-V0.43 ajoute ensuite le seed Paris de manière idempotente :
+V0.43 ajoute le seed Paris de manière idempotente :
 
 - l'ancien Prince fictif par défaut est remplacé par Alexandre ;
 - une fonction politique déjà réellement modifiée par une partie n'est pas écrasée ;
-- un ancien PNJ encore référencé par une dette, un droit ou une ressource persistante est conservé pour éviter les références cassées ;
-- aucun changement de schéma Supabase n'est requis.
+- un ancien PNJ encore référencé par une dette, un droit ou une ressource persistante est conservé pour éviter les références cassées.
+
+V0.44 enrichit ensuite les relations sans changer la structure de persistance : les souvenirs sont portés par le JSON de simulation déjà existant et l'historique détaillé reste celui des nuits personnelles.
 
 ## Sire et émancipation
 
 Le sire structure les premières nuits par la protection, les introductions, l'accès initial à la chasse, les attentes et la responsabilité politique.
 
-Lorsque le personnage devient suffisamment autonome, il peut chercher son émancipation. Une libération réussie modifie notamment son accès implicite à la chasse et sa position sociale.
+Lorsque le personnage devient suffisamment autonome, il peut chercher son émancipation. Une libération réussie modifie notamment son accès implicite à la chasse, sa position sociale et la mémoire que son sire conserve de cette confrontation.
 
 ## Domaines
 
@@ -186,7 +211,7 @@ Détenir un Domaine et disposer du droit d'y chasser restent deux choses distinc
 
 Les faveurs sont des obligations persistantes entre vampires. Les niveaux actuellement reconnus sont mineure, majeure et dette de vie.
 
-Elles possèdent un créancier, un débiteur, une origine, un statut et peuvent être publiques ou privées. V0.43 permet au monde autonome d'en créer entre PNJ.
+Elles possèdent un créancier, un débiteur, une origine, un statut et peuvent être publiques ou privées. V0.43 permet au monde autonome d'en créer entre PNJ ; V0.44 peut afficher leur poids dans une relation sans les recopier dans la mémoire du PNJ.
 
 ## Politique et offices
 
@@ -196,15 +221,19 @@ Les fonctions modélisées comprennent notamment détenteur de Domaine, représe
 
 Prince et Primogène sont distincts et ne peuvent pas être détenus simultanément par le même vampire. Les fonctions disponibles dépendent de l'époque ; le moteur ne suppose pas qu'une institution moderne existe déjà en 1435.
 
+Les situations politiques utilisent désormais le détenteur réel de l'office de Prince dans la sauvegarde, et non un identifiant historique figé.
+
 ## Chronologie historique
 
 Le moteur est sensible à l'époque et peut traverser Révolte Anarch, coalition proto-Camarilla, Camarilla institutionnelle, changements de pouvoirs mortels et pression accrue des chasseurs.
 
-La direction V0.43 est de remplacer les jalons déterministes par des transitions conditionnelles lorsque le monde local peut raisonnablement diverger.
+La direction actuelle est de remplacer les jalons déterministes par des transitions conditionnelles lorsque le monde local peut raisonnablement diverger.
 
 ## Brouillard de guerre
 
-Le moteur possède déjà une notion d'intention cachée pour les actions autonomes. La cible suivante est un véritable système d'information imparfaite : rumeurs, sources, soupçons, secrets, ancienneté d'une information et degré de certitude.
+La mémoire relationnelle V0.44 décrit ce que les PNJ pensent du PJ ; elle ne doit pas devenir une fenêtre omnisciente sur leur esprit.
+
+Le moteur possède déjà une notion d'intention cachée pour les actions autonomes. La cible suivante reste un véritable système d'information imparfaite : rumeurs, sources, soupçons, secrets, ancienneté d'une information et degré de certitude.
 
 ## Atelier legacy
 
@@ -227,12 +256,14 @@ La persistance de production utilise Supabase. SQLite reste utilisé pour les te
 - `game/paris_lore.py` : seed historique Paris 1435, factions et futurs de référence ;
 - `game/lore_sources.py` : registre machine des sources et provenance ;
 - `game/paris_simulation.py` : adaptation Paris, migration idempotente et actions autonomes ;
+- `game/relationship_memory.py` : mémoire persistante PNJ → PJ et effets relationnels ;
+- `game/relationship_ui.py` : lecture non omnisciente des liens connus du PJ ;
 - `game/chronicle_simulation_store.py` : persistance de la simulation ;
 - `game/chronicle_politics.py` : état politique canonique PJ/PNJ ;
 - `game/chronicle_offices.py` : éligibilité aux fonctions ;
 - `game/chronicle_service.py` : convergence et progression du monde ;
 - `game/chronicle_world_store.py` : historique des événements ;
-- `game/situations.py` : situations jouables et résolutions ;
+- `game/situations.py` : situations jouables, résolutions et conséquences relationnelles ;
 - `game/vampire_profile.py` : fiche Vampire ;
 - `game/era.py` : règles et institutions selon l'époque ;
 - `game/chronicle_ui.py` : interface de la Chronique ;
@@ -248,16 +279,15 @@ pytest -q
 
 La CI GitHub exécute la suite complète sur chaque pull request et chaque push vers `main`.
 
-## Priorités après V0.43
+## Priorités après V0.44
 
-1. mémoire relationnelle détaillée entre le PJ et chaque PNJ ;
+1. situations générées par l'état réel de la société et des relations ;
 2. enrichissement progressif du roster Paris by Night, sans invention présentée comme canon ;
-3. situations générées par l'état réel de la société ;
-4. rumeurs, secrets et information imparfaite ;
-5. factions autonomes, dont la Cour des Miracles, avec vrais membres et agendas ;
-6. progression sociale fondée sur des relations et ressources concrètes ;
-7. approfondissement Domaines et droits de chasse ;
-8. offices politiques émergents et Praxis ;
-9. boucle longue où les grandes dates deviennent des pressions conditionnelles.
+3. rumeurs, secrets et information imparfaite ;
+4. factions autonomes, dont la Cour des Miracles, avec vrais membres et agendas ;
+5. progression sociale fondée sur des relations et ressources concrètes ;
+6. approfondissement Domaines et droits de chasse ;
+7. offices politiques émergents et Praxis ;
+8. boucle longue où les grandes dates deviennent des pressions conditionnelles.
 
 Le principe directeur reste : **le personnage commence petit, le monde existe sans lui, et son importance éventuelle doit être gagnée par le jeu**.
