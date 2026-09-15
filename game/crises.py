@@ -1,8 +1,15 @@
 """Crises jouables issues des pressions extérieures.
 
-Une pression Anarch ou Chasseurs devient ici une situation concrète liée à un
-Domaine. Les crises sont event-sourcées : elles restent persistantes sans nouvelle
-table, et les ordres existants n'ont besoin que de nouveaux types d'action.
+Les crises sont persistées dans l'historique d'événements. Une réponse de crise
+réutilise une famille de mission existante avec un Domaine en cible :
+- Enquêter -> investigation ;
+- Infiltrer -> intrusion territoriale ;
+- Négocier -> diplomatie ;
+- Contenir -> administration ;
+- Exploiter -> développement d'influence.
+
+Le contexte de crise change la résolution de la mission sans changer le format
+des ordres persistés.
 """
 
 from __future__ import annotations
@@ -30,23 +37,28 @@ CRISIS_STATE_PREFIX = "crisis_state"
 CRISIS_RESPONSE_PREFIX = "crisis_response"
 CRISIS_INTEL_PREFIX = "crisis_intel"
 
-CRISIS_ACTION_TYPES = frozenset(
-    {
-        ActionType.CRISIS_INVESTIGATE,
-        ActionType.CRISIS_INFILTRATE,
-        ActionType.CRISIS_NEGOTIATE,
-        ActionType.CRISIS_CONTAIN,
-        ActionType.CRISIS_EXPLOIT,
-    }
-)
+APPROACH_INVESTIGATE = "investigate"
+APPROACH_INFILTRATE = "infiltrate"
+APPROACH_NEGOTIATE = "negotiate"
+APPROACH_CONTAIN = "contain"
+APPROACH_EXPLOIT = "exploit"
 
-CRISIS_ACTION_LABELS = {
-    ActionType.CRISIS_INVESTIGATE: "Enquêter sur une crise",
-    ActionType.CRISIS_INFILTRATE: "Infiltrer une crise",
-    ActionType.CRISIS_NEGOTIATE: "Négocier une crise",
-    ActionType.CRISIS_CONTAIN: "Étouffer / contenir une crise",
-    ActionType.CRISIS_EXPLOIT: "Exploiter politiquement une crise",
+CRISIS_APPROACH_LABELS = {
+    APPROACH_INVESTIGATE: "Enquêter",
+    APPROACH_INFILTRATE: "Infiltrer",
+    APPROACH_NEGOTIATE: "Négocier",
+    APPROACH_CONTAIN: "Étouffer / contenir",
+    APPROACH_EXPLOIT: "Exploiter politiquement",
 }
+
+CRISIS_APPROACH_ACTIONS = {
+    APPROACH_INVESTIGATE: ActionType.INVESTIGATE,
+    APPROACH_INFILTRATE: ActionType.DOMAIN_INTRUSION,
+    APPROACH_NEGOTIATE: ActionType.DIPLOMACY,
+    APPROACH_CONTAIN: ActionType.DOMAIN_STEWARD,
+    APPROACH_EXPLOIT: ActionType.BUILD_INFLUENCE,
+}
+_ACTION_APPROACHES = {value: key for key, value in CRISIS_APPROACH_ACTIONS.items()}
 
 
 @dataclass(frozen=True)
@@ -63,7 +75,7 @@ class Crisis:
 @dataclass(frozen=True)
 class CrisisResponse:
     crisis_id: str
-    action_type: ActionType
+    approach: str
     outcome: str
     progress: int
     intel_gain: int
@@ -103,13 +115,17 @@ def _parse_crisis_event(event: GameEvent) -> Crisis | None:
         return None
 
 
-def all_crises(state: GameState) -> dict[str, Crisis]:
+def crises_from_events(events: list[GameEvent]) -> dict[str, Crisis]:
     crises: dict[str, Crisis] = {}
-    for event in state.events:
+    for event in events:
         parsed = _parse_crisis_event(event)
         if parsed is not None:
             crises[parsed.id] = parsed
     return crises
+
+
+def all_crises(state: GameState) -> dict[str, Crisis]:
+    return crises_from_events(state.events)
 
 
 def active_crises(state: GameState) -> list[Crisis]:
@@ -138,7 +154,7 @@ def crisis_title(state: GameState, crisis: Crisis) -> str:
 
 def crisis_stage_label(stage: int) -> str:
     return {1: "I — Signes", 2: "II — Implantation", 3: "III — Menace imminente"}.get(
-        stage, f"{stage}"
+        stage, str(stage)
     )
 
 
@@ -152,7 +168,7 @@ def crisis_public_description(crisis: Crisis) -> str:
     return {
         1: "Des relais anarchs testent le terrain et diffusent leur discours.",
         2: "Une cellule locale recrute et consolide ses appuis dans le secteur.",
-        3: "La contestation est prête à se transformer en offensive politique et territoriale.",
+        3: "La contestation est prête à devenir une offensive politique et territoriale.",
     }[crisis.stage]
 
 
@@ -181,7 +197,7 @@ def crisis_clues(crisis: Crisis, intel_level: int) -> list[str]:
             clues.append("Les enquêteurs cherchent un témoin ou une trace administrative exploitable.")
         else:
             clues.append(
-                "La cellule cherche surtout accès, autonomie et droits de chasse plutôt qu'un affrontement immédiat."
+                "La cellule recherche surtout accès, autonomie et droits de chasse : un accord est possible."
             )
     return clues
 
@@ -211,8 +227,35 @@ def open_crisis(
         category=_state_category(crisis),
         message=(
             f"Nouvelle crise : {crisis_title(state, crisis)}. Stade {crisis_stage_label(1)} ; "
-            f"escalade prévue à la nuit {crisis.next_escalation_night} si la situation n'est pas maîtrisée."
+            f"escalade prévue à la nuit {crisis.next_escalation_night} si elle n'est pas maîtrisée."
         ),
+    )
+
+
+def crisis_approach_for_action(state: GameState, action: GameAction) -> str | None:
+    if not action.target_domain_id or active_crisis_for_domain(state, action.target_domain_id) is None:
+        return None
+    approach = _ACTION_APPROACHES.get(action.action_type)
+    if approach is None:
+        return None
+    if action.target_character_id or action.target_clan_id:
+        return None
+    return approach
+
+
+def crisis_action(
+    clan_id: str,
+    actor_id: str,
+    domain_id: str,
+    approach: str,
+) -> GameAction:
+    if approach not in CRISIS_APPROACH_ACTIONS:
+        raise ValueError("Unknown crisis approach")
+    return GameAction(
+        clan_id=clan_id,
+        action_type=CRISIS_APPROACH_ACTIONS[approach],
+        actor_character_id=actor_id,
+        target_domain_id=domain_id,
     )
 
 
@@ -226,32 +269,35 @@ def _expertise_bonus(character, names: tuple[str, ...]) -> int:
     return 1 if any(has_expertise(character, name) for name in names) else 0
 
 
-def _score_for_response(
+def response_score(
     state: GameState,
     crisis: Crisis,
     action: GameAction,
-    rules: GameRules,
+    rules: GameRules = DEFAULT_RULES,
 ) -> tuple[int, int]:
+    approach = crisis_approach_for_action(state, action)
+    if approach is None:
+        raise ValueError("Not a crisis-response action")
     actor = state.characters[
         action.actor_character_id or state.clan_states[action.clan_id].clan.primogen_id
     ]
     intel = current_crisis_intel(state, crisis.id, action.clan_id)
 
-    if action.action_type == ActionType.CRISIS_INVESTIGATE:
+    if approach == APPROACH_INVESTIGATE:
         score = (
             attribute_value(actor, CharacterAttribute.MENTAL)
             + _expertise_bonus(actor, ("Investigation", "Technologie", "Rue", "Occultisme"))
             + _best_support(actor, backgrounds=("Contacts", "Ressources"), disciplines=("auspex",))
         )
         modifier = 0
-    elif action.action_type == ActionType.CRISIS_INFILTRATE:
+    elif approach == APPROACH_INFILTRATE:
         score = (
             attribute_value(actor, CharacterAttribute.MENTAL)
             + _expertise_bonus(actor, ("Subterfuge", "Rue", "Investigation", "Technologie"))
             + _best_support(actor, backgrounds=("Contacts", "Alliés"), disciplines=("auspex", "celerite"))
         )
         modifier = -1 if crisis.faction == ANARCHS else 1
-    elif action.action_type == ActionType.CRISIS_NEGOTIATE:
+    elif approach == APPROACH_NEGOTIATE:
         score = (
             attribute_value(actor, CharacterAttribute.SOCIAL)
             + _expertise_bonus(actor, ("Diplomatie", "Politique", "Subterfuge", "Rue"))
@@ -262,7 +308,7 @@ def _score_for_response(
             )
         )
         modifier = -1 if crisis.faction == ANARCHS else 2
-    elif action.action_type == ActionType.CRISIS_CONTAIN:
+    elif approach == APPROACH_CONTAIN:
         score = (
             attribute_value(actor, CharacterAttribute.MENTAL)
             + _expertise_bonus(actor, ("Investigation", "Technologie", "Finance", "Médecine"))
@@ -273,7 +319,7 @@ def _score_for_response(
             )
         )
         modifier = -1 if crisis.faction == HUNTERS else 1
-    elif action.action_type == ActionType.CRISIS_EXPLOIT:
+    else:
         score = (
             attribute_value(actor, CharacterAttribute.SOCIAL)
             + _expertise_bonus(actor, ("Subterfuge", "Politique", "Intimidation", "Rue"))
@@ -284,8 +330,6 @@ def _score_for_response(
             )
         )
         modifier = 1
-    else:
-        raise ValueError("Not a crisis-response action")
 
     difficulty = max(2, rules.crisis_base_difficulty + crisis.stage - 1 + modifier)
     return score + intel, difficulty
@@ -293,7 +337,7 @@ def _score_for_response(
 
 def _response_category(
     crisis: Crisis,
-    action: GameAction,
+    approach: str,
     outcome: str,
     progress: int,
     intel_gain: int,
@@ -303,7 +347,7 @@ def _response_category(
         (
             CRISIS_RESPONSE_PREFIX,
             crisis.id,
-            action.action_type.value,
+            approach,
             outcome,
             str(progress),
             str(intel_gain),
@@ -316,22 +360,22 @@ def _parse_response_event(event: GameEvent) -> CrisisResponse | None:
     parts = event.category.split("|")
     if len(parts) != 7 or parts[0] != CRISIS_RESPONSE_PREFIX:
         return None
+    if parts[2] not in CRISIS_APPROACH_ACTIONS:
+        return None
     try:
         return CrisisResponse(
             crisis_id=parts[1],
-            action_type=ActionType(parts[2]),
+            approach=parts[2],
             outcome=parts[3],
             progress=int(parts[4]),
             intel_gain=int(parts[5]),
             actor_id=parts[6],
         )
-    except (ValueError, KeyError):
+    except ValueError:
         return None
 
 
 def crisis_member_accepts(state: GameState, action: GameAction) -> bool:
-    """Les opposants peuvent servir la ville/clan sans servir aveuglément le Primogène."""
-
     if action.actor_character_id is None:
         return True
     actor = state.characters[action.actor_character_id]
@@ -340,18 +384,20 @@ def crisis_member_accepts(state: GameState, action: GameAction) -> bool:
         return True
     if clan_state.faction_memberships.get(actor.id, ClanFactionSide.PRIMOGEN) != ClanFactionSide.OPPOSITION:
         return True
+
     crisis = active_crisis_for_domain(state, action.target_domain_id or "")
-    if crisis is None:
+    approach = crisis_approach_for_action(state, action)
+    if crisis is None or approach is None:
         return False
     domain = state.domains[crisis.domain_id]
     holder = state.characters.get(domain.holder_id or "")
     if domain.holder_id == actor.id or (holder and holder.clan_id == actor.clan_id):
         return True
-    if action.action_type in {ActionType.CRISIS_INVESTIGATE, ActionType.CRISIS_INFILTRATE}:
+    if approach in {APPROACH_INVESTIGATE, APPROACH_INFILTRATE}:
         return True
-    if action.action_type == ActionType.CRISIS_NEGOTIATE and actor.order_stance == OrderStance.REFORMIST:
+    if approach == APPROACH_NEGOTIATE and actor.order_stance == OrderStance.REFORMIST:
         return True
-    if action.action_type == ActionType.CRISIS_EXPLOIT and holder and holder.clan_id != actor.clan_id:
+    if approach == APPROACH_EXPLOIT and holder and holder.clan_id != actor.clan_id:
         return True
     return effective_relation_to_primogen(state, actor.id) >= 1
 
@@ -379,15 +425,13 @@ def crisis_response_event(
     action: GameAction,
     rules: GameRules = DEFAULT_RULES,
 ) -> GameEvent:
-    if action.action_type not in CRISIS_ACTION_TYPES:
-        raise ValueError("Not a crisis-response action")
+    approach = crisis_approach_for_action(state, action)
     crisis = active_crisis_for_domain(state, action.target_domain_id or "")
-    if crisis is None:
+    if approach is None or crisis is None:
         raise ValueError("This action requires an active crisis on the selected Domain")
     actor_id = action.actor_character_id or state.clan_states[action.clan_id].clan.primogen_id
     actor = state.characters[actor_id]
-    domain = state.domains[crisis.domain_id]
-    score, difficulty = _score_for_response(state, crisis, action, rules)
+    score, difficulty = response_score(state, crisis, action, rules)
 
     if score >= difficulty + 2:
         outcome = "strong"
@@ -400,81 +444,26 @@ def crisis_response_event(
 
     intel_gain = 0
     progress = 0
-    if action.action_type == ActionType.CRISIS_INVESTIGATE:
+    if approach == APPROACH_INVESTIGATE:
         intel_gain = 2 if outcome == "strong" else (1 if outcome == "success" else 0)
-    elif action.action_type != ActionType.CRISIS_EXPLOIT:
+    elif approach != APPROACH_EXPLOIT:
         progress = 2 if outcome == "strong" else (1 if outcome == "success" else 0)
 
-    audience = (action.clan_id,)
-    if action.action_type == ActionType.CRISIS_EXPLOIT:
-        holder = state.characters.get(domain.holder_id or "")
-        if holder is None or holder.clan_id == action.clan_id:
-            raise ValueError("Exploiting a crisis requires a foreign Domain holder")
-        if outcome in {"success", "strong"}:
-            gain = rules.crisis_exploit_influence_gain * (2 if outcome == "strong" else 1)
-            loss = rules.crisis_exploit_target_influence_loss * (2 if outcome == "strong" else 1)
-            actor.personal_influence += gain
-            holder.personal_influence = max(0.0, holder.personal_influence - loss)
-            message = (
-                f"{actor.name} transforme la crise de {domain.name} en arme politique : influence +{gain:.0f}, "
-                f"tandis que {holder.name} perd {loss:.0f} influence. La menace elle-même n'est pas réduite."
-            )
-        elif outcome == "setback":
-            add_grievance(
-                state,
-                owner_id=holder.id,
-                target_id=actor.id,
-                reason=f"Manipulation découverte autour de la crise de {domain.name}",
-                severity=1,
-            )
-            audience = tuple(sorted({action.clan_id, holder.clan_id}))
-            message = (
-                f"La tentative de {actor.name} d'exploiter la crise de {domain.name} est découverte par "
-                f"{holder.name}, qui en garde un grief."
-            )
-        else:
-            message = f"{actor.name} tente d'exploiter la crise de {domain.name}, sans levier politique exploitable."
-    elif action.action_type == ActionType.CRISIS_INVESTIGATE:
-        if intel_gain:
-            message = (
-                f"{actor.name} enquête sur {crisis_title(state, crisis)} : renseignements +{intel_gain} "
-                f"(score {score} / difficulté {difficulty})."
-            )
-        else:
-            message = (
-                f"{actor.name} enquête sur {crisis_title(state, crisis)}, sans obtenir de piste fiable "
-                f"(score {score} / difficulté {difficulty})."
-            )
+    if approach == APPROACH_INVESTIGATE:
+        result = f"renseignements +{intel_gain}" if intel_gain else "aucune piste fiable"
+    elif approach == APPROACH_EXPLOIT:
+        result = "levier politique obtenu" if outcome in {"success", "strong"} else "aucun levier sûr"
     else:
-        verb = {
-            ActionType.CRISIS_INFILTRATE: "infiltre les réseaux liés à",
-            ActionType.CRISIS_NEGOTIATE: "négocie autour de",
-            ActionType.CRISIS_CONTAIN: "mobilise ses relais pour contenir",
-        }[action.action_type]
-        if progress:
-            message = (
-                f"{actor.name} {verb} {crisis_title(state, crisis)} : progrès {progress} "
-                f"(score {score} / difficulté {difficulty})."
-            )
-        else:
-            message = (
-                f"{actor.name} {verb} {crisis_title(state, crisis)}, sans réduire la menace "
-                f"(score {score} / difficulté {difficulty})."
-            )
-
-    if outcome == "setback" and action.action_type == ActionType.CRISIS_CONTAIN:
-        if crisis.faction == HUNTERS:
-            state.masquerade_integrity = max(0.0, state.masquerade_integrity - 1.0)
-            message += " La couverture maladroite expose davantage la Mascarade (-1)."
-        else:
-            state.camarilla_stability = max(0.0, state.camarilla_stability - 1.0)
-            message += " La répression maladroite nourrit la contestation (stabilité -1)."
+        result = f"progrès {progress}" if progress else "menace non réduite"
 
     return GameEvent(
         night=state.night,
-        category=_response_category(crisis, action, outcome, progress, intel_gain, actor_id),
-        message=message,
-        audience_clan_ids=audience,
+        category=_response_category(crisis, approach, outcome, progress, intel_gain, actor_id),
+        message=(
+            f"{actor.name} tente « {CRISIS_APPROACH_LABELS[approach]} » sur {crisis_title(state, crisis)} : "
+            f"{result} (score {score} / difficulté {difficulty})."
+        ),
+        audience_clan_ids=(action.clan_id,),
     )
 
 
@@ -494,11 +483,9 @@ def _intel_event(state: GameState, crisis: Crisis, clan_id: str, gain: int) -> G
 
 
 def _required_progress(crisis: Crisis, rules: GameRules) -> int:
-    return (
-        rules.crisis_stage1_required_progress
-        if crisis.stage == 1
-        else rules.crisis_late_stage_required_progress
-    )
+    if crisis.stage == 1:
+        return rules.crisis_stage1_required_progress
+    return rules.crisis_late_stage_required_progress
 
 
 def _transition_event(
@@ -506,7 +493,7 @@ def _transition_event(
     crisis: Crisis,
     *,
     stage: int,
-    status: str = "active",
+    status: str,
     rules: GameRules,
     message: str,
 ) -> GameEvent:
@@ -532,8 +519,8 @@ def _major_failure(state: GameState, crisis: Crisis, rules: GameRules) -> GameEv
         )
         domain.servage = max(0, domain.servage - rules.hunter_crisis_failure_servage_loss)
         detail = (
-            f"Raid mortel sur {domain.name} : pression +{rules.hunter_crisis_failure_domain_pressure_gain}, "
-            f"Mascarade -{rules.hunter_crisis_failure_masquerade_loss:.0f} et Servage {domain.servage}/3."
+            f"raid mortel sur {domain.name} : pression +{rules.hunter_crisis_failure_domain_pressure_gain}, "
+            f"Mascarade -{rules.hunter_crisis_failure_masquerade_loss:.0f}, Servage {domain.servage}/3"
         )
     else:
         domain.pressure += rules.anarch_crisis_failure_domain_pressure_gain
@@ -554,8 +541,8 @@ def _major_failure(state: GameState, crisis: Crisis, rules: GameRules) -> GameEv
                         rules.anarch_crisis_failure_opposition_influence_gain
                     )
         detail = (
-            f"Offensive anarch sur {domain.name} : pression +{rules.anarch_crisis_failure_domain_pressure_gain}, "
-            f"stabilité -{rules.anarch_crisis_failure_stability_loss:.0f}; l'autorité locale est affaiblie."
+            f"offensive anarch sur {domain.name} : pression +{rules.anarch_crisis_failure_domain_pressure_gain}, "
+            f"stabilité -{rules.anarch_crisis_failure_stability_loss:.0f}; l'autorité locale recule"
         )
     return _transition_event(
         state,
@@ -563,15 +550,87 @@ def _major_failure(state: GameState, crisis: Crisis, rules: GameRules) -> GameEv
         stage=crisis.stage,
         status="failed",
         rules=rules,
-        message=f"Crise non maîtrisée — {detail}",
+        message=f"Crise non maîtrisée — {detail}.",
     )
+
+
+def _apply_response_consequences(
+    state: GameState,
+    crisis: Crisis,
+    response: CrisisResponse,
+    rules: GameRules,
+) -> list[GameEvent]:
+    events: list[GameEvent] = []
+    domain = state.domains[crisis.domain_id]
+    actor = state.characters.get(response.actor_id)
+    if actor is None:
+        return events
+
+    if response.approach == APPROACH_EXPLOIT:
+        holder = state.characters.get(domain.holder_id or "")
+        if holder is None or holder.clan_id == actor.clan_id:
+            return events
+        if response.outcome in {"success", "strong"}:
+            multiplier = 2 if response.outcome == "strong" else 1
+            gain = rules.crisis_exploit_influence_gain * multiplier
+            loss = rules.crisis_exploit_target_influence_loss * multiplier
+            actor.personal_influence += gain
+            holder.personal_influence = max(0.0, holder.personal_influence - loss)
+            events.append(
+                GameEvent(
+                    night=state.night,
+                    category="crisis_exploit",
+                    message=(
+                        f"{actor.name} transforme la crise de {domain.name} en arme politique : "
+                        f"influence +{gain:.0f}; {holder.name} perd {loss:.0f} influence. La crise reste active."
+                    ),
+                    audience_clan_ids=(actor.clan_id,),
+                )
+            )
+        elif response.outcome == "setback":
+            add_grievance(
+                state,
+                owner_id=holder.id,
+                target_id=actor.id,
+                reason=f"Manipulation découverte autour de la crise de {domain.name}",
+                severity=1,
+            )
+            clans = tuple(sorted({actor.clan_id, holder.clan_id}))
+            events.append(
+                GameEvent(
+                    night=state.night,
+                    category="crisis_exploit",
+                    message=(
+                        f"La tentative de {actor.name} d'exploiter la crise de {domain.name} est découverte par "
+                        f"{holder.name}. Un grief personnel est créé."
+                    ),
+                    audience_clan_ids=clans,
+                )
+            )
+
+    if response.approach == APPROACH_CONTAIN and response.outcome == "setback":
+        if crisis.faction == HUNTERS:
+            state.masquerade_integrity = max(0.0, state.masquerade_integrity - 1.0)
+            message = "Une couverture maladroite expose davantage la Mascarade (-1)."
+        else:
+            state.camarilla_stability = max(0.0, state.camarilla_stability - 1.0)
+            message = "Une répression maladroite nourrit la contestation (stabilité -1)."
+        events.append(
+            GameEvent(
+                night=state.night,
+                category="crisis_setback",
+                message=message,
+                audience_clan_ids=(actor.clan_id,),
+            )
+        )
+    return events
 
 
 def resolve_crisis_cycle(
     state: GameState,
     rules: GameRules = DEFAULT_RULES,
 ) -> list[GameEvent]:
-    """Applique les réponses de la nuit puis fait éventuellement évoluer les crises."""
+    """Résout les réponses de la nuit puis l'escalade éventuelle des crises."""
 
     events: list[GameEvent] = []
     responses = [
@@ -584,17 +643,20 @@ def resolve_crisis_cycle(
 
     for crisis in active_crises(state):
         crisis_responses = [response for response in responses if response.crisis_id == crisis.id]
+        for response in crisis_responses:
+            events.extend(_apply_response_consequences(state, crisis, response, rules))
+
         intel_by_clan: dict[str, int] = {}
         for response in crisis_responses:
-            if response.intel_gain <= 0 or response.actor_id not in state.characters:
+            if response.intel_gain <= 0:
                 continue
-            clan_id = state.characters[response.actor_id].clan_id
-            if clan_id:
-                intel_by_clan[clan_id] = intel_by_clan.get(clan_id, 0) + response.intel_gain
+            actor = state.characters.get(response.actor_id)
+            if actor and actor.clan_id:
+                intel_by_clan[actor.clan_id] = intel_by_clan.get(actor.clan_id, 0) + response.intel_gain
         for clan_id, gain in intel_by_clan.items():
-            event = _intel_event(state, crisis, clan_id, gain)
-            if event:
-                events.append(event)
+            intel_event = _intel_event(state, crisis, clan_id, gain)
+            if intel_event:
+                events.append(intel_event)
 
         progress = sum(response.progress for response in crisis_responses)
         required = _required_progress(crisis, rules)
@@ -608,8 +670,8 @@ def resolve_crisis_cycle(
                         status="resolved",
                         rules=rules,
                         message=(
-                            f"{crisis_title(state, crisis)} est maîtrisée avant son implantation durable. "
-                            f"La coordination de la nuit produit {progress}/{required} progrès."
+                            f"{crisis_title(state, crisis)} est maîtrisée avant implantation durable "
+                            f"({progress}/{required} progrès)."
                         ),
                     )
                 )
@@ -620,6 +682,7 @@ def resolve_crisis_cycle(
                         state,
                         crisis,
                         stage=new_stage,
+                        status="active",
                         rules=rules,
                         message=(
                             f"{crisis_title(state, crisis)} recule au stade {crisis_stage_label(new_stage)} "
@@ -654,6 +717,7 @@ def resolve_crisis_cycle(
                     state,
                     crisis,
                     stage=new_stage,
+                    status="active",
                     rules=rules,
                     message=(
                         f"{crisis_title(state, crisis)} s'aggrave au stade {crisis_stage_label(new_stage)} : "
