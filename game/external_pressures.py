@@ -47,12 +47,7 @@ def current_external_pressures(state: GameState) -> ExternalPressureState:
     )
 
 
-def _level_event(
-    state: GameState,
-    faction: str,
-    value: int,
-    previous: int,
-) -> GameEvent:
+def _level_event(state: GameState, faction: str, value: int, previous: int) -> GameEvent:
     label = "L'agitation anarch" if faction == ANARCHS else "L'attention des chasseurs mortels"
     direction = "progresse" if value > previous else "recule"
     return GameEvent(
@@ -68,12 +63,7 @@ def _choose_anarch_target(state: GameState, excluded: set[str]) -> Domain | None
         return None
     return min(
         candidates,
-        key=lambda domain: (
-            domain.rempart,
-            -domain.viandis,
-            -domain.pressure,
-            domain.id,
-        ),
+        key=lambda domain: (domain.rempart, -domain.viandis, -domain.pressure, domain.id),
     )
 
 
@@ -112,15 +102,27 @@ def _next_hunter_attention(state: GameState, current: int, rules: GameRules) -> 
     return current
 
 
+def _crisis_transitioned_this_night(state: GameState, faction: str) -> bool:
+    """Empêche une crise tout juste réglée/échouée d'être recréée immédiatement."""
+
+    for event in state.events:
+        if event.night != state.night or not event.category.startswith("crisis_state|"):
+            continue
+        parts = event.category.split("|")
+        if len(parts) >= 3 and parts[2] == faction:
+            return True
+    return False
+
+
 def resolve_external_pressures(
     state: GameState,
     rules: GameRules = DEFAULT_RULES,
 ) -> list[GameEvent]:
     """Fait évoluer les menaces et ouvre les crises lorsque les seuils sont atteints.
 
-    Une crise absorbe une partie de la pression qui l'a produite. Tant que cette
-    crise reste active, la même faction ne crée pas une seconde crise ; la pression
-    peut cependant continuer à monter, rendant une rechute rapide possible ensuite.
+    Une crise absorbe une partie de la pression qui l'a produite. Une transition de
+    crise pendant cette nuit crée aussi un tour de respiration : la même faction ne
+    peut pas recréer immédiatement une nouvelle crise lors de la même résolution.
     """
 
     previous = current_external_pressures(state)
@@ -129,7 +131,12 @@ def resolve_external_pressures(
     events: list[GameEvent] = []
     reserved_domains = {crisis.domain_id for crisis in active_crises(state)}
 
-    if anarch_pressure >= rules.anarch_incident_threshold and not has_active_crisis_for_faction(state, ANARCHS):
+    can_open_anarch = (
+        anarch_pressure >= rules.anarch_incident_threshold
+        and not has_active_crisis_for_faction(state, ANARCHS)
+        and not _crisis_transitioned_this_night(state, ANARCHS)
+    )
+    if can_open_anarch:
         domain = _choose_anarch_target(state, reserved_domains)
         if domain is not None:
             events.append(open_crisis(state, ANARCHS, domain.id, rules))
@@ -139,7 +146,12 @@ def resolve_external_pressures(
                 rules,
             )
 
-    if hunter_attention >= rules.hunter_incident_threshold and not has_active_crisis_for_faction(state, HUNTERS):
+    can_open_hunters = (
+        hunter_attention >= rules.hunter_incident_threshold
+        and not has_active_crisis_for_faction(state, HUNTERS)
+        and not _crisis_transitioned_this_night(state, HUNTERS)
+    )
+    if can_open_hunters:
         domain = _choose_hunter_target(state, reserved_domains)
         if domain is not None:
             events.append(open_crisis(state, HUNTERS, domain.id, rules))
