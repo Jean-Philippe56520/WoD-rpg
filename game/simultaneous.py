@@ -12,6 +12,7 @@ from copy import deepcopy
 
 from .actions import apply_action
 from .agency import apply_member_refusal, evaluate_member_mission
+from .clan_identity import apply_clan_action_penalty
 from .config import DEFAULT_RULES, GameRules
 from .coteries import initialize_coteries
 from .domains import open_domain_dispute
@@ -91,10 +92,19 @@ def resolve_actions_simultaneously(
     for action in sorted(actions, key=_action_key):
         trial = deepcopy(baseline)
         agency = evaluate_member_mission(trial, action)
+        clan_note = None
         if agency is not None and not agency.obeys:
             event = apply_member_refusal(trial, action, agency, rules)
         else:
+            clan_note = apply_clan_action_penalty(trial, action)
             event = apply_action(trial, action, rules)
+            if clan_note:
+                event = GameEvent(
+                    night=event.night,
+                    category=event.category,
+                    message=f"{event.message} Impulsion clanique : {clan_note}.",
+                    audience_clan_ids=event.audience_clan_ids,
+                )
 
         if (
             agency is None or agency.obeys
@@ -117,6 +127,7 @@ def resolve_actions_simultaneously(
                 ),
                 audience_clan_ids=event.audience_clan_ids,
             )
+            events[-1:] = []
         events.append(event)
 
         if (
