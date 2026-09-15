@@ -24,6 +24,7 @@ from .night_cycle import (
 )
 from .night_cycle_store import NightCycleStore
 from .situations import action_risk_preview
+from .vampire_profile import SKILL_LABELS_1435
 
 
 ATTRIBUTE_LABELS = {
@@ -36,21 +37,6 @@ ATTRIBUTE_LABELS = {
     "intelligence": "Intelligence",
     "wits": "Astuce",
     "resolve": "Résolution",
-}
-
-SKILL_LABELS = {
-    "athletics": "Athlétisme",
-    "awareness": "Vigilance",
-    "brawl": "Bagarre",
-    "stealth": "Furtivité",
-    "insight": "Perspicacité",
-    "persuasion": "Persuasion",
-    "subterfuge": "Subterfuge",
-    "etiquette": "Étiquette",
-    "academics": "Érudition",
-    "occult": "Occultisme",
-    "politics": "Politique",
-    "survival": "Survie",
 }
 
 
@@ -97,9 +83,7 @@ def _render_choice_form(
     choice_id = st.radio(
         "Votre décision",
         options=[choice.id for choice in situation.choices],
-        format_func=lambda value: next(
-            choice.label for choice in situation.choices if choice.id == value
-        ),
+        format_func=lambda value: next(choice.label for choice in situation.choices if choice.id == value),
         key=f"{key_prefix}_choice_{situation.id}",
     )
     selected = next(choice for choice in situation.choices if choice.id == choice_id)
@@ -107,7 +91,7 @@ def _render_choice_form(
     st.caption(selected.description)
     st.caption(
         f"Approche : {_label(ATTRIBUTE_LABELS, preview.attribute)} + "
-        f"{_label(SKILL_LABELS, preview.skill)} · Risque estimé : **{preview.band.title()}**"
+        f"{_label(SKILL_LABELS_1435, preview.skill)} · Risque estimé : **{preview.band.title()}**"
     )
     st.caption(preview.hint)
 
@@ -122,9 +106,7 @@ def _render_choice_form(
             st.caption(usage.description)
         else:
             utiliser_discipline = False
-            st.caption(
-                "Aucun pouvoir de Discipline actuellement modélisé ne s'applique directement à cette approche."
-            )
+            st.caption("Aucun pouvoir de Discipline actuellement modélisé ne s'applique directement à cette approche.")
 
         bonus_sang = bonus_coup_de_sang(profile.blood_potency)
         coup_indisponible = character.hunger >= 5
@@ -155,21 +137,12 @@ def _render_choice_form(
             max_chars=500,
             key=f"{key_prefix}_intent_{situation.id}_{choice_id}",
         )
-        submitted = st.form_submit_button(
-            submit_label,
-            type="primary",
-            use_container_width=True,
-        )
+        submitted = st.form_submit_button(submit_label, type="primary", use_container_width=True)
 
-    return (
-        submitted,
-        choice_id,
-        free_intent,
-        OptionsResolution(
-            depenser_volonte=depenser_volonte,
-            coup_de_sang=coup_de_sang,
-            utiliser_discipline=utiliser_discipline,
-        ),
+    return submitted, choice_id, free_intent, OptionsResolution(
+        depenser_volonte=depenser_volonte,
+        coup_de_sang=coup_de_sang,
+        utiliser_discipline=utiliser_discipline,
     )
 
 
@@ -196,13 +169,15 @@ def render_chronicle_header(character, profile, progress, simulation) -> None:
     current_night = progress.nights_per_segment if character.ready_for_convergence else character.local_night
     col4.metric("Nuit significative", f"{current_night}/{progress.nights_per_segment}")
 
-    vital1, vital2, vital3, vital4, vital5, vital6 = st.columns(6)
+    vital1, vital2, vital3, vital4 = st.columns(4)
     vital1.metric("Faim", f"{character.hunger}/5")
-    vital2.metric("Humanité", f"{character.humanity}/10")
-    vital3.metric("Volonté", f"{profile.willpower}/{profile.volonte_maximale}")
-    vital4.metric("Statut", character.status)
-    vital5.metric("Influence", f"{character.personal_influence:.1f}")
-    vital6.metric("Expérience", character.experience)
+    vital2.metric("Humanité", f"{character.humanity}/10", help=f"Flétrissures : {profile.humanity_stains}")
+    vital3.metric("Santé", f"{profile.sante_restante}/{profile.sante_maximale}")
+    vital4.metric("Volonté", f"{profile.willpower}/{profile.volonte_maximale}")
+    pos1, pos2, pos3 = st.columns(3)
+    pos1.metric("Statut", character.status)
+    pos2.metric("Influence", f"{character.personal_influence:.1f}")
+    pos3.metric("Expérience", character.experience)
 
 
 def render_chronicle_journal(store, character) -> None:
@@ -213,9 +188,7 @@ def render_chronicle_journal(store, character) -> None:
     for item in history:
         outcome = item.get("outcome_json") or {}
         with st.container(border=True):
-            st.markdown(
-                f"**Chapitre {item['chapter']} · Cycle {item['segment']} · Nuit {item['night_number']}**"
-            )
+            st.markdown(f"**Chapitre {item['chapter']} · Cycle {item['segment']} · Nuit {item['night_number']}**")
             st.write(outcome.get("summary", item["action"]))
             detail = outcome.get("detail")
             if detail:
@@ -263,18 +236,14 @@ def render_chronicle_convergence(repo, character, progress) -> None:
         )
         left, right = st.columns(2)
         if left.button(
-            "Continuer le chapitre",
-            type="secondary",
-            use_container_width=True,
+            "Continuer le chapitre", type="secondary", use_container_width=True,
             key=f"continue_chapter_{progress.chapter}_{progress.segment}",
         ):
             result = service.resolve_convergence(character.game_id, close_chapter=False)
             st.session_state["wod_last_chronicle_notice"] = _convergence_notice(result)
             st.rerun()
         if right.button(
-            "Clore le chapitre",
-            type="primary",
-            use_container_width=True,
+            "Clore le chapitre", type="primary", use_container_width=True,
             key=f"close_chapter_{progress.chapter}_{progress.segment}",
         ):
             result = service.resolve_convergence(character.game_id, close_chapter=True)
@@ -284,9 +253,7 @@ def render_chronicle_convergence(repo, character, progress) -> None:
 
     st.info(assessment.reason)
     if st.button(
-        "Faire avancer le monde",
-        type="primary",
-        use_container_width=True,
+        "Faire avancer le monde", type="primary", use_container_width=True,
         key=f"advance_cycle_{progress.chapter}_{progress.segment}",
     ):
         result = service.resolve_convergence(character.game_id, close_chapter=False)
@@ -306,12 +273,8 @@ def render_night_cycle(
     night_store = NightCycleStore(store.repository)
     world_events = ChronicleWorldStore(store.repository).list_events(character.game_id, limit=12)
     proposed_event = choose_night_event(
-        character,
-        profile,
-        simulation,
-        year=progress.year,
-        world_events=world_events,
-        nights_per_cycle=progress.nights_per_segment,
+        character, profile, simulation, year=progress.year,
+        world_events=world_events, nights_per_cycle=progress.nights_per_segment,
     )
     night_state = night_store.ensure(character, event_id=proposed_event.id)
 
@@ -322,12 +285,8 @@ def render_night_cycle(
 
     if night_state.phase == NightPhase.EVENT:
         event = _situation_for_id(
-            character,
-            profile,
-            simulation,
-            year=progress.year,
-            situation_id=night_state.event_id,
-            world_events=world_events,
+            character, profile, simulation, year=progress.year,
+            situation_id=night_state.event_id, world_events=world_events,
             nights_per_cycle=progress.nights_per_segment,
         )
         if event is None:
@@ -344,25 +303,15 @@ def render_night_cycle(
             st.markdown(f"#### {event.title}")
             st.write(event.body)
             play, choice_id, free_intent, options = _render_choice_form(
-                event,
-                character,
-                profile,
-                simulation,
-                key_prefix=(
-                    f"night_event_{character.chapter}_{character.segment}_{character.local_night}"
-                ),
+                event, character, profile, simulation,
+                key_prefix=f"night_event_{character.chapter}_{character.segment}_{character.local_night}",
                 submit_label="Résoudre l'événement",
             )
         if play:
             result = resolve_night_event(
-                character,
-                profile,
-                simulation,
-                event,
-                choice_id,
+                character, profile, simulation, event, choice_id,
                 nights_per_segment=progress.nights_per_segment,
-                free_intent=free_intent,
-                options=options,
+                free_intent=free_intent, options=options,
             )
             night_store.apply_event(character, night_state, result)
             simulation_store.save(result.resolution.simulation)
@@ -386,20 +335,14 @@ def render_night_cycle(
     st.markdown("### Le reste de votre nuit")
     st.info(time_remaining_text(night_state.remaining_actions))
 
-    free_action_count = sum(
-        1 for item in night_state.log if item.get("kind") == "free_action"
-    )
+    free_action_count = sum(1 for item in night_state.log if item.get("kind") == "free_action")
     if night_state.remaining_actions > 0:
         st.caption(
             "Ces actions viennent de votre vampire : vous choisissez maintenant ce qu'il veut entreprendre avec le temps qui lui reste."
         )
         actions = free_action_situations(
-            character,
-            profile,
-            simulation,
-            year=progress.year,
-            event_id=night_state.event_id,
-            world_events=world_events,
+            character, profile, simulation, year=progress.year,
+            event_id=night_state.event_id, world_events=world_events,
             nights_per_cycle=progress.nights_per_segment,
         )
         if not actions:
@@ -409,10 +352,7 @@ def render_night_cycle(
                 st.markdown(f"#### {situation.title}")
                 st.write(situation.body)
                 play, choice_id, free_intent, options = _render_choice_form(
-                    situation,
-                    character,
-                    profile,
-                    simulation,
+                    situation, character, profile, simulation,
                     key_prefix=(
                         f"free_action_{character.chapter}_{character.segment}_"
                         f"{character.local_night}_{len(night_state.log)}_{index}"
@@ -421,16 +361,11 @@ def render_night_cycle(
                 )
             if play:
                 result = resolve_free_action(
-                    character,
-                    profile,
-                    simulation,
-                    situation,
-                    choice_id,
+                    character, profile, simulation, situation, choice_id,
                     nights_per_segment=progress.nights_per_segment,
                     remaining_actions=night_state.remaining_actions,
                     action_index=free_action_count + 1,
-                    free_intent=free_intent,
-                    options=options,
+                    free_intent=free_intent, options=options,
                 )
                 night_store.apply_free_action(character, night_state, result)
                 simulation_store.save(result.resolution.simulation)
@@ -447,21 +382,20 @@ def render_night_cycle(
         "Terminer la nuit",
         type="primary" if night_state.remaining_actions == 0 else "secondary",
         use_container_width=True,
-        key=(
-            f"finish_night_{character.chapter}_{character.segment}_{character.local_night}"
-        ),
+        key=f"finish_night_{character.chapter}_{character.segment}_{character.local_night}",
     ):
-        night_store.finish_night(
-            character,
-            night_state,
-            nights_per_segment=progress.nights_per_segment,
+        finished = night_store.finish_night(
+            character, night_state, nights_per_segment=progress.nights_per_segment,
         )
-        profil_recupere, recuperation = recuperer_volonte_fin_nuit(profile)
+        persisted_profile = profile_store.ensure_for_character(finished)
+        profil_recupere, recuperation = recuperer_volonte_fin_nuit(persisted_profile)
         if recuperation > 0:
             profile_store.save(profil_recupere)
         notice = (
             f"La nuit {character.local_night} s'achève. Ses conséquences sont désormais inscrites dans la Chronique."
         )
+        if finished.humanity < character.humanity:
+            notice += f" Votre Humanité tombe à {finished.humanity}."
         if recuperation > 0:
             notice += f" Vous récupérez {recuperation} point(s) de Volonté."
         st.session_state["wod_last_chronicle_notice"] = notice
@@ -469,7 +403,7 @@ def render_night_cycle(
 
 
 def install_night_cycle_ui() -> None:
-    """Installe l'interface de Chronique V0.48c et ses leviers vampiriques."""
+    """Installe l'interface de Chronique et ses leviers vampiriques."""
 
     from . import chronicle_ui
 
