@@ -36,8 +36,8 @@ class MultiplayerGameService:
                 for character in state.characters.values()
                 if character.clan_id == clan_id and character.id != state.prince_id
             }
-            if len(orders.actions) > len(eligible_ids):
-                raise ValueError("A clan cannot submit more than one action per active member")
+            if len(orders.actions) != len(eligible_ids):
+                raise ValueError("V0.8 requires exactly one action per active clan member")
             used_actors: set[str] = set()
             for action in orders.actions:
                 if action.clan_id != clan_id:
@@ -49,6 +49,8 @@ class MultiplayerGameService:
                 if action.actor_character_id in used_actors:
                     raise ValueError("A vampire can perform only one action per night")
                 used_actors.add(action.actor_character_id)
+            if used_actors != eligible_ids:
+                raise ValueError("Every active clan member must receive exactly one action")
         else:
             # Une nuit déjà soumise avant V0.8 conserve exactement son ancien budget.
             if len(orders.actions) > self.rules.actions_per_clan:
