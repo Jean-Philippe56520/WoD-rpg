@@ -30,6 +30,7 @@ from game.world import REQUIRED_CLANS, create_initial_game_state
 
 
 AUTH_SESSION_KEY = "wod_auth_session"
+AUTH_SEEN_KEY = "wod_auth_seen_in_streamlit_session"
 LOCAL_PLAYER_KEY = "wod_local_player_id"
 
 st.set_page_config(
@@ -66,16 +67,26 @@ def _restore_persistent_session(backend: str) -> None:
         st.session_state.pop(AUTH_SESSION_KEY, None)
         session = None
 
+    # Si cette même session Streamlit avait déjà un utilisateur authentifié et
+    # que game_ui vient de supprimer AUTH_SESSION_KEY, il s'agit d'une déconnexion
+    # explicite (ou d'une invalidation). On purge l'appareil au lieu de reconnecter.
+    if session is None and st.session_state.get(AUTH_SEEN_KEY):
+        st.session_state[AUTH_SEEN_KEY] = False
+        clear_device_refresh_token()
+        return
+
     if isinstance(session, AuthSession):
         try:
             session = auth.validate(session)
             st.session_state[AUTH_SESSION_KEY] = session
+            st.session_state[AUTH_SEEN_KEY] = True
             persist_device_refresh_token(session.refresh_token)
             return
         except AuthError:
             st.session_state.pop(AUTH_SESSION_KEY, None)
+            st.session_state[AUTH_SEEN_KEY] = False
             clear_device_refresh_token()
-            session = None
+            return
 
     stored = read_device_refresh_token()
     if not stored.loaded:
@@ -91,9 +102,11 @@ def _restore_persistent_session(backend: str) -> None:
         session = auth.refresh(stored.value)
         session = auth.validate(session)
         st.session_state[AUTH_SESSION_KEY] = session
+        st.session_state[AUTH_SEEN_KEY] = True
         persist_device_refresh_token(session.refresh_token)
     except AuthError:
         st.session_state.pop(AUTH_SESSION_KEY, None)
+        st.session_state[AUTH_SEEN_KEY] = False
         clear_device_refresh_token()
 
 
