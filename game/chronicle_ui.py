@@ -31,6 +31,7 @@ from .creation_rules import (
     conviction as conviction_rule,
 )
 from .era import era_for_year
+from .relationship_ui import render_relationship_memories
 from .sire_relations import sire_bond
 from .situations import generate_situations, resolve_situation
 from .vampire_profile import profile_for_creation
@@ -552,6 +553,7 @@ def render_chronicle_app(
 
     with relations_tab:
         _render_sire(character, profile, era_for_year(progress.year))
+        render_relationship_memories(store, character, simulation)
         _render_profile(character, profile)
         st.markdown("### Votre position")
         st.write(f"**Réputation :** {character.reputation:+d}")

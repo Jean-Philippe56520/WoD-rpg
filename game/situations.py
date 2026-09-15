@@ -11,6 +11,11 @@ from .chronicle_simulation import (
 from .clans import situation_bonus
 from .dice import DiceResult, roll_pool
 from .era import CamarillaStage, era_for_year
+from .relationship_memory import (
+    record_relationship_memory,
+    relationship_difficulty_adjustment,
+    relationship_tags,
+)
 from .sire_relations import sire_bond
 from .vampire_profile import VampireProfile
 
@@ -194,7 +199,7 @@ def _hunting_situation(
     )
 
 
-def _political_situation(character: PlayerCharacter, year: int) -> Situation:
+def _political_situation(character: PlayerCharacter, year: int, simulation: SimulationState) -> Situation:
     era = era_for_year(year)
     if era.camarilla_stage in {CamarillaStage.PROJECT, CamarillaStage.COALITION}:
         body = (
@@ -211,7 +216,7 @@ def _political_situation(character: PlayerCharacter, year: int) -> Situation:
         id="political_current",
         title="Des mots qui peuvent devenir des lois",
         body=body,
-        source_actor_id="npc_prince_godefroy",
+        source_actor_id=simulation.offices.get("prince"),
         tags=("court", "politics", "debate", "diplomacy"),
         choices=(
             SituationChoice(
@@ -306,7 +311,7 @@ def generate_situations(
     year: int,
 ) -> tuple[Situation, ...]:
     hunting = _hunting_situation(character, profile, simulation, year)
-    political = _political_situation(character, year)
+    political = _political_situation(character, year, simulation)
     clan = _clan_situation(character)
     bond = sire_bond(character, profile, era_for_year(year))
 
@@ -347,6 +352,94 @@ def _remove_sire_hunting_access(simulation: SimulationState, character_id: str) 
     return replace(simulation, hunting_rights=rights)
 
 
+def _relationship_effect(
+    simulation: SimulationState,
+    character: PlayerCharacter,
+    situation: Situation,
+    choice: SituationChoice,
+    dice: DiceResult,
+) -> tuple[SimulationState, tuple[str, ...]]:
+    actor_id = situation.source_actor_id
+    if not actor_id or actor_id not in simulation.npcs:
+        return simulation, ()
+
+    # Listening or abstaining does not make the source actor remember the PJ.
+    # Hunting becomes relational only if the Beast leaves a memorable trace.
+    if choice.effect in {"political_intel", "abstain"}:
+        return simulation, ()
+    if choice.effect in {"hunt", "hunt_social"} and not (dice.messy_critical or dice.bestial_failure):
+        return simulation, ()
+
+    disposition_delta = 0
+    trust_delta = 0
+    respect_delta = 0
+    fear_delta = 0
+    grievance = False
+    valence = 1 if dice.success else -1
+
+    if choice.effect == "sire_service":
+        if dice.success:
+            disposition_delta, trust_delta = 1, 1
+            respect_delta = 1 if dice.critical else 0
+        else:
+            trust_delta = -1
+    elif choice.effect == "sire_negotiate":
+        if dice.success:
+            trust_delta, respect_delta = 1, 1
+        else:
+            disposition_delta, trust_delta = -1, -1
+    elif choice.effect == "sire_refuse":
+        if dice.success:
+            disposition_delta, trust_delta, respect_delta = -1, -1, 1
+            valence = 0
+        else:
+            disposition_delta, trust_delta = -1, -1
+            grievance = True
+    elif choice.effect == "seek_release":
+        if dice.success:
+            respect_delta = 2
+        else:
+            disposition_delta, trust_delta = -1, -1
+            grievance = True
+    elif choice.effect in {"political_voice", "protect_touchstone"}:
+        if dice.success:
+            disposition_delta, respect_delta = 1, 1
+            if dice.critical:
+                respect_delta += 1
+        else:
+            respect_delta = -1
+    elif choice.effect == "cautious_distance":
+        if not dice.success:
+            disposition_delta, respect_delta = -1, -1
+    elif choice.effect in {"hunt", "hunt_social"}:
+        disposition_delta = -1
+        fear_delta = 1
+        grievance = True
+        valence = -1
+
+    if dice.messy_critical:
+        fear_delta += 1
+    if dice.bestial_failure:
+        disposition_delta -= 1
+        fear_delta += 1
+        grievance = True
+        valence = -1
+
+    updated = record_relationship_memory(
+        simulation,
+        character,
+        actor_id,
+        year=character.chronicle_year,
+        disposition_delta=disposition_delta,
+        trust_delta=trust_delta,
+        respect_delta=respect_delta,
+        fear_delta=fear_delta,
+        awareness_delta=1,
+        grievance=grievance,
+    )
+    return updated, relationship_tags(actor_id, choice.effect, valence)
+
+
 def resolve_situation(
     character: PlayerCharacter,
     profile: VampireProfile,
@@ -364,11 +457,26 @@ def resolve_situation(
 
     bonus = situation_bonus(character.clan_id, situation.tags)
     pool = profile.pool(choice.attribute, choice.skill, bonus=bonus)
+    relational_effects = {
+        "sire_service",
+        "sire_negotiate",
+        "sire_refuse",
+        "seek_release",
+        "political_voice",
+        "protect_touchstone",
+        "cautious_distance",
+    }
+    relation_adjustment = (
+        relationship_difficulty_adjustment(simulation, situation.source_actor_id, character)
+        if choice.effect in relational_effects
+        else 0
+    )
+    difficulty = max(1, choice.difficulty + relation_adjustment)
     seed = (
         f"{character.character_id}:{character.chapter}:{character.segment}:"
         f"{character.local_night}:{situation.id}:{choice.id}"
     )
-    dice = roll_pool(pool=pool, hunger=character.hunger, difficulty=choice.difficulty, seed=seed)
+    dice = roll_pool(pool=pool, hunger=character.hunger, difficulty=difficulty, seed=seed)
 
     hunger = character.hunger
     reputation = character.reputation
@@ -379,6 +487,10 @@ def resolve_situation(
     next_profile = profile
     summary = f"{choice.label} — {dice.label}."
     details: list[str] = []
+    if relation_adjustment < 0:
+        details.append("La confiance acquise rend cet échange plus facile.")
+    elif relation_adjustment > 0:
+        details.append("Votre passif avec cet interlocuteur rend l'échange plus difficile.")
 
     if choice.effect in {"hunt", "hunt_social"}:
         if dice.success:
@@ -471,6 +583,14 @@ def resolve_situation(
         hunger = min(5, hunger + 1)
         details.append("L'échec nourrit la Bête et crée une impulsion dont vous devrez assumer la suite.")
 
+    next_simulation, memory_tags = _relationship_effect(
+        next_simulation,
+        character,
+        situation,
+        choice,
+        dice,
+    )
+
     text = " ".join(free_intent.strip().split())
     if text:
         details.append(f"Intention déclarée : « {text[:240]} ».")
@@ -493,7 +613,7 @@ def resolve_situation(
         summary=summary,
         detail=" ".join(details),
         updated_character=updated,
-        tags=tuple(sorted(set(situation.tags + (dice.label,)))),
+        tags=tuple(sorted(set(situation.tags + (dice.label,) + memory_tags))),
     )
     return SituationResolution(
         situation=situation,
