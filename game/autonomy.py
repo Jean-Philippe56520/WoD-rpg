@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from .embrace import resolve_embrace_reactions
 from .factions import (
     effective_relation_to_primogen,
     ideology_relation_modifier,
@@ -143,6 +144,7 @@ def resolve_autonomous_reactions(state: GameState) -> list[GameEvent]:
             )
         )
     events.extend(_resolve_called_boons(state))
+    events.extend(resolve_embrace_reactions(state))
     events.extend(_defection_reactions(state))
     events.extend(_ambition_reactions(state))
     return events
