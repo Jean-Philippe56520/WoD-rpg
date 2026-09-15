@@ -6,11 +6,11 @@ from typing import Iterable, Mapping
 
 from .actions import apply_action
 from .config import DEFAULT_RULES, GameRules
+from .coteries import determine_coterie_stances, initialize_coteries
 from .embrace import process_primogen_petition
-from .ideology import build_currents, initialize_current_politics
 from .models import Candidate, EmbracePetitionOrder, GameAction, GameEvent, GameState, PrimogenVote
 from .offices import install_prince
-from .politics import VoteResolution, determine_current_stances, resolve_praxis_vote
+from .politics import VoteResolution, resolve_praxis_vote
 
 
 @dataclass(frozen=True)
@@ -25,16 +25,31 @@ def _validate_action_budget(
     rules: GameRules,
 ) -> list[GameAction]:
     actions = list(actions)
-    counts = {clan_id: 0 for clan_id in state.clan_states}
+    legacy_counts = {clan_id: 0 for clan_id in state.clan_states}
+    used_actors: set[str] = set()
+
     for action in actions:
-        if action.clan_id not in counts:
+        if action.clan_id not in state.clan_states:
             raise ValueError(f"Unknown clan: {action.clan_id}")
-        counts[action.clan_id] += 1
-        if counts[action.clan_id] > rules.actions_per_clan:
-            raise ValueError(
-                f"{state.clan_states[action.clan_id].clan.name}: "
-                f"maximum {rules.actions_per_clan} actions per night"
-            )
+
+        if action.actor_character_id is None:
+            legacy_counts[action.clan_id] += 1
+            if legacy_counts[action.clan_id] > rules.actions_per_clan:
+                raise ValueError(
+                    f"{state.clan_states[action.clan_id].clan.name}: "
+                    f"maximum {rules.actions_per_clan} legacy actions per night"
+                )
+            continue
+
+        actor = state.characters.get(action.actor_character_id)
+        if actor is None or actor.clan_id != action.clan_id:
+            raise ValueError("Action actor must belong to the acting clan")
+        if actor.id == state.prince_id:
+            raise ValueError("The Prince cannot act as a clan member")
+        if actor.id in used_actors:
+            raise ValueError(f"{actor.name} cannot perform more than one action per night")
+        used_actors.add(actor.id)
+
     return actions
 
 
@@ -47,7 +62,7 @@ def resolve_night(
     rules: GameRules = DEFAULT_RULES,
 ) -> NightResolution:
     next_state = deepcopy(state)
-    initialize_current_politics(next_state, rules)
+    initialize_coteries(next_state)
     actions = _validate_action_budget(next_state, actions, rules)
     candidates = list(candidates)
     candidate_map = {candidate.id: candidate for candidate in candidates}
@@ -55,29 +70,30 @@ def resolve_night(
     for action in actions:
         next_state.events.append(apply_action(next_state, action, rules))
 
-    initialize_current_politics(next_state, rules)
+    initialize_coteries(next_state)
     vote_result: VoteResolution | None = None
     if next_state.prince_id is None:
-        stances = determine_current_stances(next_state, rules)
-        for current_id, stance in stances.items():
-            current = build_currents(next_state, stance.clan_id)[current_id]
+        stances = determine_coterie_stances(next_state)
+        for clan_id, stance in stances.items():
+            clan_state = next_state.clan_states[clan_id]
+            leader = next_state.characters[clan_state.opposition_leader_id]
             if stance.supports_primogen:
                 message = (
-                    f"Le courant {current.name} soutient son Primogene "
-                    f"(score {stance.support_score:.0f})."
+                    f"L'opposition de {clan_state.clan.name}, menée par {leader.name}, soutient "
+                    f"le Primogène pour ce vote (score {stance.support_score:.0f})."
                 )
             else:
                 ally_name = next_state.characters[stance.allied_primogen_id].name
                 message = (
-                    f"Le courant {current.name} refuse son Primogene et active son alliance "
-                    f"avec {ally_name}."
+                    f"L'opposition de {clan_state.clan.name}, menée par {leader.name}, refuse "
+                    f"le Primogène et active son alliance avec {ally_name}."
                 )
             next_state.events.append(
                 GameEvent(
                     night=next_state.night,
-                    category="current",
+                    category="coterie",
                     message=message,
-                    audience_clan_ids=(stance.clan_id,),
+                    audience_clan_ids=(clan_id,),
                 )
             )
 
@@ -103,7 +119,7 @@ def resolve_night(
                     night=next_state.night,
                     category="praxis",
                     message=(
-                        "La Praxis reste contestee : aucun candidat ne rassemble une majorite "
+                        "La Praxis reste contestée : aucun candidat ne rassemble une majorité "
                         "politique suffisante. La Camarilla locale s'affaiblit."
                     ),
                 )
@@ -128,5 +144,6 @@ def resolve_night(
                 )
             next_state = process_primogen_petition(next_state, clan_id, petition, rules)
 
+    initialize_coteries(next_state)
     next_state.night += 1
     return NightResolution(state=next_state, vote=vote_result)
