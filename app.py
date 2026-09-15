@@ -29,10 +29,25 @@ from game.world import candidates_from_state
 
 st.set_page_config(page_title="WoD RPG - Chronique politique", page_icon="🩸", layout="wide")
 st.title("WoD RPG - Chronique politique")
-st.caption("V0.6 - identité persistante, lobby de clan et nuits multijoueur asynchrones")
+st.caption("V0.7 - fiches simplifiées, courants politiques et nuits multijoueur persistantes")
 
 AUTH_SESSION_KEY = "wod_auth_session"
 LOCAL_PLAYER_KEY = "wod_local_player_id"
+
+BLOOD_RANK_LABELS = {
+    "newborn": "Nouveau-né",
+    "ancilla": "Ancilla",
+    "elder": "Ancien",
+}
+
+DISCIPLINE_LABELS = {
+    "auspex": "Auspex",
+    "celerite": "Célérité",
+    "domination": "Domination",
+    "force_d_ame": "Force d'âme",
+    "presence": "Présence",
+    "puissance": "Puissance",
+}
 
 
 @st.cache_resource
@@ -123,6 +138,16 @@ def describe_orders(orders: ClanNightOrders, state) -> list[str]:
             f"{petition.proposed_childe_name}"
         )
     return lines
+
+
+def format_score_map(values: dict[str, int], labels: dict[str, str] | None = None) -> str:
+    labels = labels or {}
+    if not values:
+        return "Aucun"
+    return " · ".join(
+        f"{labels.get(name, name)} {score}"
+        for name, score in values.items()
+    )
 
 
 try:
@@ -408,6 +433,9 @@ with clan_tab:
                 f"**{current.name}** - {label} - influence **{current.influence:.0f}** - "
                 f"chef : **{leader.name if leader else 'aucun'}**"
             )
+            st.caption(
+                f"Humanité {current.humanity_axis.value} · Traditions {current.tradition_axis.value}"
+            )
             if current_id != primary_id:
                 st.caption(
                     f"Loyauté : {own_clan_state.current_loyalties.get(current_id, 50):.0f}/100"
@@ -415,11 +443,25 @@ with clan_tab:
             for member_id in current.member_ids:
                 member = state.characters[member_id]
                 role = "Primogène" if member.is_primogen else "Membre"
-                st.caption(
-                    f"{member.name} - {role} - influence {member.personal_influence:.0f} - "
-                    f"Humanité {member.humanity} - Humanisme {member.humanism:+.0f} - "
-                    f"Tradition {member.tradition:+.0f}"
-                )
+                with st.expander(f"{member.name} — {role} — influence {member.personal_influence:.0f}"):
+                    st.caption(
+                        f"Courant : Humanité {member.humanity_axis.value} · "
+                        f"Traditions {member.tradition_axis.value} · "
+                        f"Rang de Sang : {BLOOD_RANK_LABELS[member.blood_rank.value]}"
+                    )
+                    physical_col, social_col, mental_col = st.columns(3)
+                    physical_col.metric("Physique", member.physical)
+                    social_col.metric("Social", member.social)
+                    mental_col.metric("Mental", member.mental)
+                    st.write(
+                        "**Expertises :** "
+                        + (" · ".join(member.expertises) if member.expertises else "Aucune")
+                    )
+                    st.write(
+                        "**Disciplines :** "
+                        + format_score_map(member.disciplines, DISCIPLINE_LABELS)
+                    )
+                    st.write("**Historiques :** " + format_score_map(member.backgrounds))
 
 with city_tab:
     st.subheader("Informations publiques")
@@ -467,6 +509,6 @@ with reports_tab:
                 st.write(f"- {item}")
 
 st.caption(
-    "V0.6 : identité Supabase Auth persistante, un compte = un clan, ordres privés, "
-    "résolution globale et rapports propres à chaque clan."
+    "V0.7 : fiches simplifiées, Humanité/Traditions en axes politiques, "
+    "multijoueur persistant et résolution globale des nuits."
 )
