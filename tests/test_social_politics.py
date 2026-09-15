@@ -1,8 +1,11 @@
+from game.actions import apply_action
 from game.autonomy import resolve_autonomous_reactions
 from game.models import (
+    ActionType,
     BoonLevel,
     BoonStatus,
     ClanFactionSide,
+    GameAction,
     PoliticalRequestStatus,
     PromiseStatus,
     RequestDecision,
@@ -36,6 +39,36 @@ def test_boon_lifecycle_records_prestation_and_reputation():
     fulfill_boon(state, boon.id)
     assert boon.status == BoonStatus.FULFILLED
     assert state.characters["ventrue_victor"].reputation == min(3, before + 1)
+
+
+def test_call_boon_action_calls_oldest_due_debt_between_two_vampires():
+    state = create_initial_game_state()
+    first = create_boon(
+        state,
+        creditor_id="ventrue_claire",
+        debtor_id="ventrue_victor",
+        level=BoonLevel.MINOR,
+        origin="Premier accord",
+    )
+    second = create_boon(
+        state,
+        creditor_id="ventrue_claire",
+        debtor_id="ventrue_victor",
+        level=BoonLevel.MAJOR,
+        origin="Second accord",
+    )
+    event = apply_action(
+        state,
+        GameAction(
+            clan_id="ventrue",
+            action_type=ActionType.CALL_BOON,
+            actor_character_id="ventrue_claire",
+            target_character_id="ventrue_victor",
+        ),
+    )
+    assert first.status == BoonStatus.CALLED
+    assert second.status == BoonStatus.DUE
+    assert "réclame" in event.message
 
 
 def test_refusing_major_boon_creates_serious_grievance_and_reputation_loss():
