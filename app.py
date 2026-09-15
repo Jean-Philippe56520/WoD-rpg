@@ -145,8 +145,6 @@ def _runtime_create_repository(*args, **kwargs):
     return runtime_repo, backend_label
 
 
-repository_factory.create_repository = _runtime_create_repository
-
 if mode == PRODUCTION_MODE:
     _restore_persistent_session(backend)
 else:
@@ -176,6 +174,11 @@ else:
 
 # L'interface historique reste commune aux deux modes. Le proxy runtime décide
 # de la partie réellement visée et le Mode Atelier contourne uniquement l'auth UI,
-# jamais les règles du moteur.
+# jamais les règles du moteur. L'injection est restaurée dans tous les cas afin
+# de ne jamais polluer le module repository_factory au-delà de ce rendu Streamlit.
 ui_path = Path(__file__).with_name("game_ui.py")
-exec(compile(ui_path.read_text(encoding="utf-8"), str(ui_path), "exec"), globals(), globals())
+repository_factory.create_repository = _runtime_create_repository
+try:
+    exec(compile(ui_path.read_text(encoding="utf-8"), str(ui_path), "exec"), globals(), globals())
+finally:
+    repository_factory.create_repository = _ORIGINAL_CREATE_REPOSITORY
