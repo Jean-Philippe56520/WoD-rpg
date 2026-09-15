@@ -16,6 +16,7 @@ from .chronicle import (
     sire_for_id,
 )
 from .chronicle_offices import office_eligibility
+from .chronicle_politics import political_actor, primary_office, validate_political_state
 from .chronicle_scenes import ChronicleSceneStore
 from .chronicle_service import ChronicleService
 from .chronicle_simulation import active_hunting_access, ensure_character_links
@@ -40,7 +41,7 @@ from .vampire_profile_store import VampireProfileStore
 
 
 ROAD_LABELS = {
-    "humanitatis": "Via Humanitatis",
+    "humanitatis": "Via Humanitas",
     "regalis": "Via Regalis",
     "caeli": "Via Caeli",
     "bestiae": "Via Bestiae",
@@ -129,7 +130,7 @@ def _render_creation(
         "Les conséquences morales de respecter ou violer cette Conviction seront reliées à l'Humanité lors de la passe dédiée."
     )
 
-    st.info("Voie des personnages joueurs : Via Humanitatis.")
+    st.info("Voie des personnages joueurs : Via Humanitas.")
 
     feeding_preference = None
     if clan_id == "ventrue":
@@ -222,12 +223,13 @@ def _render_creation(
     st.rerun()
 
 
-def _render_header(character, profile, progress) -> None:
+def _render_header(character, profile, progress, simulation) -> None:
+    current_office = primary_office(simulation, character.character_id)
     st.title(character.name)
     st.caption(
         f"{CLAN_LABELS[character.clan_id]} · {character.concept} · "
         f"{profile.generation}e génération · Étreint en {character.embraced_year} · "
-        f"{OFFICE_LABELS.get(character.office, character.office)}"
+        f"{OFFICE_LABELS.get(current_office, current_office)}"
     )
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("Année", progress.year)
@@ -425,15 +427,16 @@ def _render_profile(character, profile) -> None:
         st.write(f"**Restriction de chasse :** {profile.feeding_preference}")
 
 
-def _render_domain_and_debts(character, simulation, year: int) -> None:
+def _render_domain_and_debts(character, simulation, year: int, characters) -> None:
     st.subheader("Chasse et Domaine")
     rights = active_hunting_access(simulation, character.character_id, year)
     if not rights:
         st.warning("Vous ne disposez actuellement d'aucun droit de chasse reconnu.")
     for right in rights:
         domain = simulation.domains[right.domain_id]
-        holder = simulation.npcs.get(domain.holder_id or "")
-        holder_name = holder.name if holder else (domain.holder_id or "sans détenteur reconnu")
+        holder_name = "sans détenteur reconnu"
+        if domain.holder_id:
+            holder_name = political_actor(simulation, characters, domain.holder_id).name
         with st.container(border=True):
             st.markdown(f"**{domain.name}**")
             st.write(domain.description)
@@ -457,12 +460,11 @@ def _render_domain_and_debts(character, simulation, year: int) -> None:
         else:
             direction = "Vous devez"
             other_id = boon.creditor_id
-        other = simulation.npcs.get(other_id)
-        other_name = other.name if other else other_id
+        other_name = political_actor(simulation, characters, other_id).name
         st.write(f"- **{direction}** une faveur {boon.level} — {other_name} · {boon.status} · {boon.origin}")
 
 
-def _render_world(repo, character, simulation, progress) -> None:
+def _render_world(repo, character, simulation, progress, characters) -> None:
     era = era_for_year(progress.year)
     st.subheader(f"{progress.year} — {era.label}")
     st.write(era.public_context)
@@ -474,10 +476,13 @@ def _render_world(repo, character, simulation, progress) -> None:
 
     st.markdown("### Pouvoirs visibles")
     prince_id = simulation.offices.get("prince")
-    prince = simulation.npcs.get(prince_id or "")
-    if prince:
+    if prince_id:
+        prince = political_actor(simulation, characters, prince_id)
         st.write(f"**Prince local :** {prince.name} — {prince.clan_id.title()}")
-    st.write(f"**Caïnites connus du moteur :** {len(simulation.npcs)} PNJ actifs ou persistants")
+    st.write(
+        f"**Caïnites persistants :** {len(simulation.npcs) + len(characters)} "
+        "PJ et PNJ connus de la chronique"
+    )
 
     eligibilities = office_eligibility(character, simulation, era)
     with st.expander("Votre accès aux fonctions politiques"):
@@ -598,6 +603,10 @@ def render_chronicle_app(
     if linked != simulation:
         simulation = simulation_store.save(linked)
 
+    characters = store.list_characters(CHRONICLE_GAME_ID)
+    validate_political_state(simulation, characters, era_for_year(progress.year))
+    current_office = primary_office(simulation, character.character_id)
+
     notice = st.session_state.pop("wod_last_chronicle_notice", None)
     if notice:
         st.success(notice)
@@ -613,9 +622,9 @@ def render_chronicle_app(
         st.write(f"**Personnage :** {character.name}")
         st.write(f"**Clan :** {CLAN_LABELS[character.clan_id]}")
         st.write(f"**Sire :** {character.sire_name}")
-        st.write(f"**Fonction :** {OFFICE_LABELS.get(character.office, character.office)}")
+        st.write(f"**Fonction :** {OFFICE_LABELS.get(current_office, current_office)}")
 
-    _render_header(character, profile, progress)
+    _render_header(character, profile, progress, simulation)
 
     night_tab, scenes_tab, relations_tab, domain_tab, journal_tab, world_tab = st.tabs(
         ["Cette nuit", "Scènes", "Mes liens", "Domaine & dettes", "Journal", "Le monde"]
@@ -646,10 +655,10 @@ def render_chronicle_app(
         st.write(f"**Expérience accumulée :** {character.experience}")
 
     with domain_tab:
-        _render_domain_and_debts(character, simulation, progress.year)
+        _render_domain_and_debts(character, simulation, progress.year, characters)
 
     with journal_tab:
         _render_journal(store, character)
 
     with world_tab:
-        _render_world(repo, character, simulation, progress)
+        _render_world(repo, character, simulation, progress, characters)
