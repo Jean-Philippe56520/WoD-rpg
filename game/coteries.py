@@ -29,7 +29,7 @@ from .factions import (
     initialize_factions,
     set_faction_side,
 )
-from .models import GameState
+from .models import ActionType, GameAction, GameState
 from .social_politics import active_grievance_score
 
 
@@ -87,6 +87,15 @@ CANONICAL_COTERIES: tuple[CoterieDefinition, ...] = (
         ),
         base_cohesion=1,
     ),
+)
+
+HOSTILE_COTERIE_ACTIONS = frozenset(
+    {
+        ActionType.UNDERMINE,
+        ActionType.POACH,
+        ActionType.DOMAIN_INTRUSION,
+        ActionType.BRACONNAGE,
+    }
 )
 
 
@@ -205,6 +214,79 @@ def effective_coterie_cohesion(state: GameState, coterie: CoterieDefinition) -> 
     relation_modifier = 1 if average_relation >= 1.5 else (-1 if average_relation <= 0.5 else 0)
     grievance_penalty = 1 if serious_grievance else 0
     return max(0, min(3, coterie.base_cohesion + relation_modifier - grievance_penalty))
+
+
+def coterie_cooperation_bonus(state: GameState, actor_id: str, target_id: str) -> int:
+    """Bonus compact pour diplomatie/enquête entre compagnons de coterie."""
+
+    coterie = shared_coterie(actor_id, target_id)
+    if coterie is None:
+        return 0
+    return 1 if effective_coterie_cohesion(state, coterie) >= 1 else 0
+
+
+def coterie_conflict_penalty(state: GameState, actor_id: str, target_id: str) -> int:
+    """Malus d'exécution lorsqu'un membre agit contre un compagnon de coterie."""
+
+    coterie = shared_coterie(actor_id, target_id)
+    if coterie is None:
+        return 0
+    if active_grievance_score(state, actor_id, target_id) >= 2:
+        return 0
+    relation = state.characters[actor_id].relations.get(target_id, 1)
+    return 1 if relation >= 1 and effective_coterie_cohesion(state, coterie) >= 1 else 0
+
+
+def hostile_coterie_target_id(state: GameState, action: GameAction) -> str | None:
+    if action.action_type not in HOSTILE_COTERIE_ACTIONS:
+        return None
+    if action.target_character_id:
+        return action.target_character_id
+    if action.target_domain_id:
+        domain = state.domains.get(action.target_domain_id)
+        return domain.holder_id if domain else None
+    return None
+
+
+def should_refuse_coterie_conflict(
+    state: GameState,
+    action: GameAction,
+    actor_id: str,
+) -> bool:
+    """Un PNJ peut refuser un ordre qui attaque un compagnon auquel il reste lié.
+
+    Le Primogène ne refuse jamais sa propre décision. Un membre très proche du
+    Primogène (relation effective >=2) obéit, mais subit encore le malus de conflit.
+    """
+
+    target_id = hostile_coterie_target_id(state, action)
+    if not target_id or target_id not in state.characters:
+        return False
+    clan_state = state.clan_states[action.clan_id]
+    if actor_id == clan_state.clan.primogen_id:
+        return False
+    coterie = shared_coterie(actor_id, target_id)
+    if coterie is None or effective_coterie_cohesion(state, coterie) < 2:
+        return False
+    if active_grievance_score(state, actor_id, target_id) >= 2:
+        return False
+    actor = state.characters[actor_id]
+    if actor.relations.get(target_id, 1) < 1:
+        return False
+    return effective_relation_to_primogen(state, actor_id) <= 1
+
+
+def strain_coterie_bond(state: GameState, actor_id: str, target_id: str) -> str | None:
+    """Dégrade une relation bilatérale après une action hostile effectivement menée."""
+
+    coterie = shared_coterie(actor_id, target_id)
+    if coterie is None:
+        return None
+    actor = state.characters[actor_id]
+    target = state.characters[target_id]
+    actor.relations[target_id] = max(0, actor.relations.get(target_id, 1) - 1)
+    target.relations[actor_id] = max(0, target.relations.get(actor_id, 1) - 1)
+    return coterie.name
 
 
 def coterie_member_summary(state: GameState, coterie: CoterieDefinition) -> tuple[str, ...]:
