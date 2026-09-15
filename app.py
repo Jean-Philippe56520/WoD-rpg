@@ -5,6 +5,7 @@ from pathlib import Path
 import streamlit as st
 
 import game.repository_factory as repository_factory
+from game.agency_ui import render_agency_panel
 from game.auth import (
     DEFAULT_SUPABASE_PUBLISHABLE_KEY,
     AuthError,
@@ -128,7 +129,7 @@ mode = st.sidebar.radio(
     format_func=lambda value: "Chronique" if value == PRODUCTION_MODE else "Atelier (test/dev)",
     key="wod_runtime_mode_selector",
 )
-st.sidebar.caption("Moteur V0.14 — secrets, rumeurs et information imparfaite")
+st.sidebar.caption("Moteur V0.15 — autonomie politique des membres")
 set_runtime_mode(mode)
 
 try:
@@ -184,3 +185,4 @@ if "state" in globals() and "player_clan" in globals() and player_clan:
     render_court_panel(state, player_clan)
     render_hunger_panel(state, player_clan)
     render_information_panel(state, player_clan)
+    render_agency_panel(state, player_clan)
