@@ -7,7 +7,13 @@ from game.embrace import (
     resolve_embrace_reactions,
 )
 from game.factions import initialize_factions
-from game.models import Candidate, ClanFactionSide, PoliticalAmbition, PrimogenPosition
+from game.models import (
+    Candidate,
+    ClanFactionSide,
+    EmbraceStatus,
+    PoliticalAmbition,
+    PrimogenPosition,
+)
 from game.offices import install_prince
 from game.serialization import game_state_from_json, game_state_to_json
 from game.world import create_initial_game_state
@@ -76,7 +82,7 @@ def test_old_approved_request_without_childe_is_enacted_once():
         PrimogenPosition.SUPPORT,
     )
     request = state.embrace_requests["embrace_1"]
-    request.status = request.status.APPROVED
+    request.status = EmbraceStatus.APPROVED
     request.decision_night = state.night
 
     events = resolve_embrace_reactions(state)
