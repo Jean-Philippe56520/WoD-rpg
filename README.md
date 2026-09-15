@@ -4,23 +4,25 @@ Jeu politique vampirique persistant et principalement asynchrone, développé en
 
 Application stable : https://wod-rpg.streamlit.app
 
-## V0.9
+## Périmètre du MVP
 
-Le MVP reste limité à **Brujah, Toreador et Ventrue**. Chaque joueur contrôle un clan mais incarne directement son **Primogène** ; les autres vampires restent des acteurs politiques distincts avec leurs propres intérêts.
+Le MVP reste limité à **Brujah, Toreador et Ventrue**. Chaque joueur contrôle un clan mais incarne directement son **Primogène**. Les autres vampires du clan sont des acteurs politiques distincts avec leurs propres ambitions, relations, Humanité, Statut, réputation, faveurs, griefs et intérêts territoriaux.
 
-### Fiche de vampire
+Le cœur du jeu reste : **pouvoir, influence, information, relations, Prestation et conséquences persistantes**. Les Domaines ne transforment pas le jeu en jeu de conquête.
 
-Chaque personnage possède désormais des dimensions séparées :
+## Modèle politique
 
-- un **rapport aux mortels** : Humaniste ou Prédateur ;
-- un **rapport à l'ordre** : Orthodoxe ou Réformateur ;
-- une **Humanité réelle** de 0 à 10, distincte de l'idéologie politique ;
+Chaque vampire possède notamment :
+
+- un rapport aux mortels : **Humaniste / Prédateur** ;
+- un rapport à l'ordre : **Orthodoxe / Réformateur** ;
+- une Humanité réelle de 0 à 10 ;
 - Physique, Social et Mental de 0 à 2 ;
-- des Expertises, Disciplines et Historiques ;
+- Expertises, Disciplines et Historiques ;
 - un Rang de Sang ;
 - une influence personnelle ;
-- un **Statut** de 0 à 5 ;
-- une **réputation** de -3 à +3 ;
+- un Statut de 0 à 5 ;
+- une réputation de -3 à +3 ;
 - une ambition politique active ;
 - des relations personnelles.
 
@@ -30,173 +32,189 @@ La résolution de base reste compacte :
 Caractéristique + Expertise éventuelle (+1) + meilleure Discipline OU meilleur Historique pertinent
 ```
 
-Le Rang de Sang n'est pas un bonus universel.
+## Factions internes
 
-## Factions internes du clan
+Le terme **coterie** est réservé aux futures vraies coteries vampiriques, potentiellement transclaniques. Chaque clan possède actuellement :
 
-Le terme **coterie** n'est plus utilisé pour les deux camps politiques internes. Une coterie, dans Vampire, reste un groupe de vampires potentiellement transclanique. Chaque clan possède donc actuellement :
+1. la **Faction du Primogène** ;
+2. la **Faction d'opposition**.
 
-1. la **faction du Primogène** ;
-2. la **faction d'opposition**.
+Le Primogène représente officiellement le clan mais ne commande pas automatiquement tous ses membres. L'opposition possède son propre chef et ses propres intérêts.
 
-Le Primogène appartient obligatoirement à sa faction. L'opposition possède un chef distinct dont la combinaison politique ne peut pas être exactement identique à celle du Primogène.
+La relation effective au Primogène combine la relation personnelle 0–2 et l'affinité politique :
 
-L'influence d'une faction est la somme de l'influence personnelle de ses membres.
+- deux positions identiques : +1 ;
+- une position identique : 0 ;
+- deux positions opposées : -1.
 
-### Relation au Primogène
+## Prestation, griefs et promesses
 
-Chaque membre possède une relation personnelle au Primogène de **0 à 2**. Le moteur ajoute ensuite l'affinité politique :
+Les faveurs sont des obligations persistantes : mineure, majeure ou dette de vie. Elles possèdent un créancier, un débiteur, une origine et un statut. Honorer une faveur améliore la réputation ; la refuser peut créer un grief et dégrader fortement la crédibilité du débiteur.
 
-| Compatibilité | Modificateur |
-| --- | ---: |
-| deux positions identiques | +1 |
-| une position identique | 0 |
-| deux positions opposées | -1 |
+Les tensions politiques ne reposent pas sur une jauge opaque. Elles sont enregistrées comme **griefs explicites** avec auteur, cible, cause et gravité.
 
-```text
-Relation effective = relation personnelle + affinité politique
-```
+Les PNJ peuvent adresser des requêtes au Primogène. Celui-ci peut accepter, refuser, négocier ou promettre. Les promesses ont une échéance et peuvent désormais être **honorées explicitement avant les missions de nuit**.
 
-Le résultat peut aller de **-1 à 3**. Une faction n'est pas déduite automatiquement de cette valeur : un opposant peut respecter le Primogène et un loyaliste peut devenir politiquement fragile.
+## Domaines — V0.10
 
-## Prestation
+Un Domaine est une ressource politique personnelle, pas une case appartenant automatiquement au clan ou au Primogène.
 
-La V0.9 introduit une économie explicite de **faveurs** entre vampires.
+Chaque Domaine possède trois caractéristiques de 0 à 3 :
 
-Une faveur possède :
+- **Viandis** : richesse et capacité nourricière du Domaine ;
+- **Servage** : implantation et emprise sur les mortels et réseaux locaux ;
+- **Rempart** : contrôle, sécurité et capacité à détecter les intrusions.
 
-- un créancier ;
-- un débiteur ;
-- un niveau : mineure, majeure ou dette de vie ;
-- une origine ;
-- un statut : due, réclamée, honorée ou refusée ;
-- un caractère public ou privé.
+Il possède également une pression territoriale et un risque de Mascarade.
 
-Honorer une faveur améliore la réputation. Refuser une faveur dégrade la réputation du débiteur et crée un grief politique proportionnel à la gravité de la dette.
+### Six Domaines initiaux
 
-Un vampire disposant d'une faveur due peut utiliser l'action **Réclamer une faveur**.
+La ville commence volontairement avec six Domaines asymétriques :
 
-## Griefs, promesses et requêtes
+- Quartier des Affaires — Adrien de Keravel ;
+- Vieux-Centre — Claire Beaumont ;
+- Quartier des Arts — Elise Valmont ;
+- Campus et Hôpital — Camille Vernier ;
+- Les Docks — Marcus Le Guen ;
+- Les Faubourgs — Sarah Morel.
 
-La V0.9 ne repose pas sur une jauge opaque de « mécontentement ». Les tensions sont mémorisées sous forme de **griefs explicites** : auteur, cible, raison, gravité et nuit de création.
+Des membres de l'opposition détiennent donc déjà des Domaines. La Primogéniture et la propriété territoriale sont volontairement séparées.
 
-Chaque nuit, le moteur peut générer au plus une requête politique par clan à partir des ambitions et tensions existantes. Le Primogène peut :
+## Droits de chasse
 
-- **accepter** ;
-- **refuser** ;
-- **négocier** ;
-- **promettre**.
+Détenir un Domaine et disposer du droit d'y chasser sont deux choses différentes.
 
-Accepter peut améliorer la relation et produire une contrepartie de Prestation. Refuser peut dégrader la relation et créer un grief. Négocier crée généralement une dette. Promettre crée une obligation persistante avec échéance ; une promesse non tenue crée un grief sérieux et abîme la réputation du Primogène.
+Un droit de chasse possède :
 
-## Autonomie politique des PNJ
+- un Domaine ;
+- un bénéficiaire ;
+- un accordeur ;
+- une durée précise en nuits ;
+- des conditions ;
+- éventuellement une faveur de Prestation associée ;
+- un statut actif, révoqué, expiré ou contesté.
 
-Les réactions autonomes sont **déterministes et explicables**. Un membre ne change pas de faction au hasard.
+Le détenteur peut accorder ou retirer des droits sur son Domaine. Le **Prince reconnu** peut également arbitrer les droits et dispose côté moteur de la prérogative de réattribuer ou retirer un Domaine personnel. Une réattribution contestée peut devenir un litige public.
 
-Une défection vers l'opposition nécessite actuellement plusieurs conditions :
+Une succession de Primogène ne transfère jamais automatiquement les Domaines personnels du titulaire sortant.
 
-- relation effective très faible ;
-- grief sérieux envers le Primogène ;
-- opportunité politique ;
-- compatibilité suffisante avec le chef d'opposition.
+## Pression territoriale
 
-Le chef d'opposition peut également renforcer ses réseaux lorsque son ambition et le contexte politique le justifient.
+Le Viandis n'est pas une production abstraite de points. Il limite politiquement la quantité d'exploitation supportable.
 
-Les actions autonomes sont résolues après les actions principales de la nuit et apparaissent dans les rapports lorsqu'elles sont connaissables par le clan.
+- trop de droits de chasse actifs par rapport au Viandis augmentent la pression ;
+- le braconnage augmente également la pression ;
+- le détenteur peut utiliser l'action **Administrer son Domaine** et son Servage pour réduire cette pression ;
+- une pression excessive peut provoquer un incident local et endommager la Mascarade.
 
-## Une action par vampire et par nuit
+## Intrusion, Rempart et braconnage
 
-Une soumission moderne contient **exactement une action pour chaque vampire actif du clan**. Un même vampire ne peut pas agir deux fois.
+Actions territoriales V0.10 :
 
-Actions disponibles :
+- **Administrer son Domaine** ;
+- **Infiltrer un Domaine** ;
+- **Braconner sur un Domaine**.
 
-- Développer son influence ;
-- Diplomatie ;
-- Consolider une relation ;
-- Recruter dans sa faction ;
-- Fragiliser un membre ;
-- Débaucher vers l'opposition ;
-- Enquêter ;
-- Réclamer une faveur.
+Le Rempart s'oppose aux intrusions. Une infiltration réussie peut améliorer le renseignement territorial. Une intrusion ou un braconnage détecté peut produire :
 
-Un membre d'opposition peut refuser une mission lorsque sa relation avec le Primogène est trop faible. Une mission diplomatique compatible avec ses convictions peut au contraire être mieux acceptée et mieux exécutée.
+- grief personnel ;
+- litige territorial ;
+- information dans les rapports concernés ;
+- pression supplémentaire ;
+- conséquences ultérieures sur la Mascarade.
 
-## Brouillard de guerre
+Un membre de l'opposition conserve son autonomie : une action territoriale ordonnée par le joueur peut encore être refusée si elle ne sert pas suffisamment ses intérêts.
 
-Les Primogènes étrangers sont publics. Les autres membres, leurs factions, relations, griefs, ambitions et ordres restent cachés tant qu'ils ne sont pas découverts.
+## Politique territoriale et requêtes
 
-L'action **Enquêter** produit progressivement du renseignement :
+L'ambition **Obtenir un Domaine** produit désormais une demande concrète de droit de chasse lorsqu'un Domaine du Primogène est disponible.
 
-- niveau 1 : identité d'un membre étranger ;
-- niveau 2 : faction, relation effective et influence connues.
+Le Primogène peut :
+
+- accepter et concéder l'accès ;
+- négocier l'accès contre une faveur ;
+- refuser et créer potentiellement un grief ;
+- promettre l'accès pour une nuit ultérieure.
+
+Une promesse territoriale honorée crée effectivement le droit de chasse avant les missions de la nuit.
+
+## Brouillard de guerre territorial
+
+Le nom d'un Domaine et son détenteur officiel sont publics.
+
+Restent privés ou soumis au renseignement :
+
+- Viandis, Servage et Rempart des Domaines étrangers ;
+- pression réelle ;
+- droits privés ;
+- certains litiges ;
+- intrusions non détectées.
+
+Le renseignement territorial possède deux niveaux et est séparé du renseignement sur les personnages.
 
 ## Praxis
 
-Le vote des Primogènes est traité comme un **mécanisme local de reconnaissance de la Praxis**, pas comme une procédure universelle de la Camarilla.
+Le vote des Primogènes reste un **mécanisme local de reconnaissance de la Praxis**, pas une procédure universelle de la Camarilla.
 
-- si l'opposition soutient son Primogène, 100 % de l'influence du clan suit son vote ;
-- si elle refuse, l'influence d'opposition est divisée selon `opposition_transfer_ratio` ;
-- par défaut, 50 % reste au Primogène et 50 % renforce le Primogène allié de l'opposition.
+Si l'opposition refuse de suivre son Primogène, son influence est divisée selon `opposition_transfer_ratio`, configurable et fixé à 50 % par défaut.
 
-La règle reste configurable et testée.
-
-## Cycle d'une nuit V0.9
+## Cycle d'une nuit V0.10
 
 ```text
-Requêtes internes / faveurs / promesses
+Requêtes / promesses / Prestation
         |
 Décisions du Primogène
         |
-Attribution des missions
+Promesses honorées
+        |
+Concessions ou révocations territoriales
+        |
+Une mission par vampire
         |
 Validation des trois clans
         |
-Résolution des actions
+Résolution simultanée
         |
-Praxis / Étreintes si nécessaire
+Praxis / Étreintes
         |
-Réactions autonomes motivées
+Réactions autonomes
         |
-Conséquences : relations, griefs, réputation, factions
+Pression territoriale / Mascarade
         |
 Rapports privés
         |
-Nuit suivante + nouvelles requêtes
+Nuit suivante
 ```
 
 ## Compatibilité et persistance
 
-Aucune migration SQL Supabase n'est nécessaire pour V0.9 : les nouveaux objets politiques sont intégrés au `state_json` existant.
+Aucune migration SQL Supabase n'est requise pour V0.10. Les Domaines, droits, litiges et renseignements territoriaux sont intégrés au `state_json` existant.
 
-La lecture est rétrocompatible :
+La lecture reste rétrocompatible :
 
-- les sauvegardes V0.6/V0.7/V0.8 sont migrées à la lecture ;
-- `Humanité +/-` devient le rapport aux mortels ;
-- `Traditions +/-` devient le rapport à l'ordre ;
-- les anciennes `coterie_memberships` deviennent `faction_memberships` ;
-- la véritable Humanité, le Statut, la réputation et l'ambition active sont enrichis depuis la fiche canonique lorsqu'ils manquent ;
-- les ordres V0.7 sans acteur restent résolubles ;
-- les ordres V0.8 restent résolubles ;
-- les nouveaux ordres V0.9 utilisent `version = 3` et incluent les décisions sur les requêtes internes.
+- sauvegardes V0.6/V0.7/V0.8/V0.9 migrées à la lecture ;
+- anciennes `coterie_memberships` converties en `faction_memberships` ;
+- sauvegardes V0.9 sans Domaines enrichies automatiquement avec les six Domaines initiaux ;
+- ordres V0.7, V0.8 et V0.9 toujours lisibles et résolubles ;
+- ordres V0.10 utilisent `version = 4` ;
+- la nuit de production déjà soumise au format legacy reste explicitement couverte par les tests.
 
-Les données vivantes de la chronique ne sont jamais réinitialisées.
+GitHub contient le code et les contenus statiques, jamais les sauvegardes vivantes.
 
 ## Architecture
 
 - `game/models.py` : modèles de domaine ;
-- `game/character_rules.py` : résolution compacte des capacités ;
-- `game/ideology.py` : compatibilité des anciens axes et affinités ;
-- `game/factions.py` : factions internes, chef d'opposition, relation effective et influence ;
-- `game/coteries.py` : couche de compatibilité V0.8 uniquement ;
+- `game/factions.py` : politique interne ;
 - `game/social_politics.py` : Prestation, griefs, promesses et requêtes ;
-- `game/autonomy.py` : réactions autonomes déterministes ;
-- `game/politics.py` : reconnaissance de Praxis et transfert d'influence ;
+- `game/domains.py` : Domaines, droits de chasse, Viandis, Servage, Rempart, pression et litiges ;
 - `game/actions.py` : actions individuelles ;
+- `game/autonomy.py` : réactions autonomes déterministes ;
+- `game/politics.py` : reconnaissance de Praxis ;
 - `game/offices.py` : Prince, Primogènes et successions ;
-- `game/embrace.py` : demandes d'Étreinte ;
+- `game/embrace.py` : Étreintes ;
 - `game/resolution.py` : pipeline global d'une nuit ;
 - `game/serialization.py` : sérialisation et migrations rétrocompatibles ;
-- `game/multiplayer.py` : orchestration joueur/clan/nuit ;
+- `game/multiplayer.py` : orchestration asynchrone ;
 - `game/persistence.py`, `game/supabase_repository.py` : persistance ;
 - `app.py` : interface Streamlit ;
 - `tests/` : tests automatisés et smoke test Streamlit.
@@ -210,8 +228,8 @@ pytest -q
 ## Suite cible
 
 1. vraies coteries transclaniques ;
-2. domaines et droits de chasse comme sources de pouvoir politique ;
-3. demandes d'Étreinte davantage reliées à la Prestation ;
+2. Prince comme acteur politique autonome ;
+3. résolution et arbitrage avancés des litiges territoriaux ;
 4. rumeurs, secrets et information imparfaite ;
-5. Prince comme acteur autonome ;
-6. Mascarade, stabilité, institutions et factions PNJ.
+5. Étreintes davantage reliées à la Prestation et aux Domaines ;
+6. institutions, stabilité, Mascarade et factions PNJ.
