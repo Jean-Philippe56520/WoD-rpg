@@ -4,9 +4,11 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import Iterable, Mapping
 
+from .action_resolution import resolve_all_actions_simultaneously
 from .autonomy import resolve_autonomous_reactions
 from .config import DEFAULT_RULES, GameRules
 from .court import resolve_court_agenda
+from .crises import resolve_crisis_cycle
 from .domains import (
     grant_hunting_right,
     has_hunting_access,
@@ -32,7 +34,6 @@ from .models import (
 )
 from .offices import install_prince
 from .politics import VoteResolution, resolve_praxis_vote
-from .simultaneous import resolve_actions_simultaneously
 from .social_politics import (
     add_grievance,
     create_boon,
@@ -219,7 +220,7 @@ def resolve_night(
     for clan_id, order in domain_decisions:
         next_state.events.append(_apply_domain_decision(next_state, clan_id, order))
 
-    next_state.events.extend(resolve_actions_simultaneously(next_state, actions, rules))
+    next_state.events.extend(resolve_all_actions_simultaneously(next_state, actions, rules))
 
     initialize_factions(next_state)
     vote_result: VoteResolution | None = None
@@ -320,9 +321,11 @@ def resolve_night(
     # La chasse de routine se produit avant les conséquences territoriales de fin
     # de nuit : un droit reste exploitable pendant sa nuit d'échéance incluse.
     next_state.events.extend(resolve_hunger(next_state))
-    # Les menaces extérieures exploitent l'état politique et la Mascarade tels
-    # qu'ils ressortent de toute la nuit. Leur pression territoriale peut donc
-    # encore provoquer un incident de Domaine dans cette même résolution.
+    # Les crises actives sont d'abord traitées avec les missions de cette nuit.
+    # Elles peuvent reculer, s'aggraver ou produire leur conséquence majeure.
+    next_state.events.extend(resolve_crisis_cycle(next_state, rules))
+    # Seulement ensuite, les pressions extérieures peuvent ouvrir une nouvelle
+    # crise. Elle sera jouable à partir de la nuit suivante, jamais rétroactivement.
     next_state.events.extend(resolve_external_pressures(next_state, rules))
     next_state.events.extend(resolve_domain_pressure(next_state))
     initialize_factions(next_state)
