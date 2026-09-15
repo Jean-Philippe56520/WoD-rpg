@@ -73,8 +73,12 @@ class VampireProfile:
     health_superficial: int = 0
     health_aggravated: int = 0
     humanity_stains: int = 0
-    schema_version: int = 4
-    # Bonus transitoire, jamais sérialisé.
+    current_compulsion: str | None = None
+    compulsion_focus: str = ""
+    compulsion_scope: str = ""
+    schema_version: int = 5
+    # Bonus transitoire, jamais sérialisé. Il peut être négatif lorsqu'une
+    # Compulsion pénalise une action sans rapport avec l'impulsion de la Bête.
     bonus_resolution: int = 0
 
     def __post_init__(self) -> None:
@@ -86,8 +90,8 @@ class VampireProfile:
             raise ValueError("Willpower must be between 0 and 10")
         if not 0 <= self.humanity_stains <= 10:
             raise ValueError("Humanity Stains must be between 0 and 10")
-        if not 0 <= self.bonus_resolution <= 10:
-            raise ValueError("Le bonus temporaire de résolution doit être compris entre 0 et 10")
+        if not -10 <= self.bonus_resolution <= 10:
+            raise ValueError("Le modificateur temporaire de résolution doit être compris entre -10 et 10")
         _validate_scores("attribute", self.attributes, ATTRIBUTE_NAMES, 1, 5)
         _validate_scores("skill", self.skills, SKILL_NAMES, 0, 5)
         for skill, items in self.specialties.items():
@@ -112,6 +116,8 @@ class VampireProfile:
             raise ValueError("Health damage cannot be negative")
         if self.health_superficial + self.health_aggravated > self.sante_maximale:
             raise ValueError("Health damage cannot exceed the Health tracker")
+        if self.current_compulsion is None and (self.compulsion_focus or self.compulsion_scope):
+            raise ValueError("Compulsion metadata requires an active Compulsion")
 
     @property
     def volonte_maximale(self) -> int:
@@ -240,6 +246,9 @@ def default_profile(character: PlayerCharacter) -> VampireProfile:
         health_superficial=0,
         health_aggravated=0,
         humanity_stains=0,
+        current_compulsion=None,
+        compulsion_focus="",
+        compulsion_scope="",
     )
 
 
@@ -284,11 +293,15 @@ def profile_to_dict(profile: VampireProfile) -> dict:
         "health_superficial": profile.health_superficial,
         "health_aggravated": profile.health_aggravated,
         "humanity_stains": profile.humanity_stains,
+        "current_compulsion": profile.current_compulsion,
+        "compulsion_focus": profile.compulsion_focus,
+        "compulsion_scope": profile.compulsion_scope,
         "schema_version": profile.schema_version,
     }
 
 
 def profile_from_dict(data: Mapping) -> VampireProfile:
+    compulsion = str(data["current_compulsion"]) if data.get("current_compulsion") else None
     return VampireProfile(
         game_id=str(data["game_id"]),
         character_id=str(data["character_id"]),
@@ -309,5 +322,8 @@ def profile_from_dict(data: Mapping) -> VampireProfile:
         health_superficial=int(data.get("health_superficial", 0)),
         health_aggravated=int(data.get("health_aggravated", 0)),
         humanity_stains=int(data.get("humanity_stains", 0)),
-        schema_version=max(4, int(data.get("schema_version", 1))),
+        current_compulsion=compulsion,
+        compulsion_focus=str(data.get("compulsion_focus", "")) if compulsion else "",
+        compulsion_scope=str(data.get("compulsion_scope", "")) if compulsion else "",
+        schema_version=max(5, int(data.get("schema_version", 1))),
     )
