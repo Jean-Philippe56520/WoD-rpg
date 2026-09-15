@@ -9,6 +9,7 @@ from .chronicle_simulation import (
     simulation_from_dict,
     simulation_to_dict,
 )
+from .paris_simulation import parisify_simulation
 
 
 class ChronicleSimulationStore:
@@ -38,22 +39,27 @@ class ChronicleSimulationStore:
                 filters={"game_id": game_id},
                 limit=1,
             )
-            return simulation_from_dict(rows[0]["state_json"]) if rows else None
+            if not rows:
+                return None
+            return parisify_simulation(simulation_from_dict(rows[0]["state_json"]))
         with self.repository._connect() as con:
             row = con.execute(
                 "SELECT state_json FROM wod_chronicle_simulations WHERE game_id = ?",
                 (game_id,),
             ).fetchone()
-        return simulation_from_dict(json.loads(row["state_json"])) if row else None
+        if row is None:
+            return None
+        return parisify_simulation(simulation_from_dict(json.loads(row["state_json"])))
 
     def ensure(self, game_id: str, *, year: int = 1435) -> SimulationState:
         existing = self.get(game_id)
         if existing is not None:
             return existing
-        state = initial_simulation(game_id, year)
+        state = parisify_simulation(initial_simulation(game_id, year))
         return self.save(state)
 
     def save(self, state: SimulationState) -> SimulationState:
+        state = parisify_simulation(state)
         payload = simulation_to_dict(state)
         if self._is_supabase:
             raw = self.repository.client.rpc(
@@ -64,7 +70,7 @@ class ChronicleSimulationStore:
                 raw = raw[0]
             if not isinstance(raw, dict):
                 raise RuntimeError("Unexpected simulation persistence response")
-            return simulation_from_dict(raw)
+            return parisify_simulation(simulation_from_dict(raw))
         with self.repository._connect() as con:
             con.execute(
                 """

@@ -194,7 +194,7 @@ mode = st.sidebar.radio(
     format_func=lambda value: "Chronique" if value == PRODUCTION_MODE else "Atelier legacy (test/dev)",
     key="wod_runtime_mode_selector",
 )
-st.sidebar.caption("Moteur V0.42 — Chronique solo persistante")
+st.sidebar.caption("Moteur V0.43 — Paris 1435, société caïnite autonome")
 set_runtime_mode(mode)
 
 try:
