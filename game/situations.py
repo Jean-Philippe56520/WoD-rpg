@@ -426,7 +426,7 @@ def _relationship_effect(
         return simulation, ()
 
     # Listening or abstaining does not make the source actor remember the PJ.
-    # Hunting becomes relational only if the action produces a political trace.
+    # Hunting becomes relational only if the Beast leaves a memorable trace.
     if choice.effect in {"political_intel", "abstain"}:
         return simulation, ()
     if choice.effect in {"hunt", "hunt_social"} and not (dice.messy_critical or dice.bestial_failure):
@@ -437,35 +437,42 @@ def _relationship_effect(
     respect_delta = 0
     fear_delta = 0
     grievance = False
-    valence = 0
+    valence = 1 if dice.success else -1
 
     if choice.effect == "sire_service":
-        disposition_delta = 1 if dice.success else -1
-        trust_delta = 1 if dice.success else -1
-        valence = 1 if dice.success else -1
+        if dice.success:
+            disposition_delta, trust_delta = 1, 1
+            respect_delta = 1 if dice.critical else 0
+        else:
+            trust_delta = -1
     elif choice.effect == "sire_negotiate":
-        respect_delta = 1 if dice.success else -1
-        trust_delta = 1 if dice.success else -1
-        grievance = not dice.success
-        valence = 1 if dice.success else -1
+        if dice.success:
+            trust_delta, respect_delta = 1, 1
+        else:
+            disposition_delta, trust_delta = -1, -1
     elif choice.effect == "sire_refuse":
-        respect_delta = 1 if dice.success else -1
-        trust_delta = -1
-        grievance = not dice.success
-        valence = 1 if dice.success else -1
+        if dice.success:
+            disposition_delta, trust_delta, respect_delta = -1, -1, 1
+            valence = 0
+        else:
+            disposition_delta, trust_delta = -1, -1
+            grievance = True
     elif choice.effect == "seek_release":
-        respect_delta = 2 if dice.success else -1
-        trust_delta = 1 if dice.success else -1
-        grievance = not dice.success
-        valence = 2 if dice.success else -1
+        if dice.success:
+            respect_delta = 2
+        else:
+            disposition_delta, trust_delta = -1, -1
+            grievance = True
     elif choice.effect in {"political_voice", "protect_touchstone"}:
-        respect_delta = 1 if dice.success else -1
-        disposition_delta = 1 if dice.critical else 0
-        grievance = dice.bestial_failure
-        valence = 1 if dice.success else -1
+        if dice.success:
+            disposition_delta, respect_delta = 1, 1
+            if dice.critical:
+                respect_delta += 1
+        else:
+            respect_delta = -1
     elif choice.effect == "cautious_distance":
-        disposition_delta = 0 if dice.success else -1
-        valence = 0 if dice.success else -1
+        if not dice.success:
+            disposition_delta, respect_delta = -1, -1
     elif choice.effect in {"hunt", "hunt_social"}:
         disposition_delta = -1
         fear_delta = 1
