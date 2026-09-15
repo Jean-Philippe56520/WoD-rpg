@@ -4,7 +4,6 @@ from pathlib import Path
 
 import streamlit as st
 
-import game.multiplayer as multiplayer_module
 import game.repository_factory as repository_factory
 from game.agency_ui import render_agency_panel
 from game.auth import (
@@ -20,7 +19,7 @@ from game.browser_session import (
 )
 from game.coterie_ui import render_coteries_panel
 from game.court_ui import render_court_panel
-from game.crisis_ui import CRISIS_OVERRIDE_KEY, apply_crisis_override, render_crises_panel
+from game.crisis_ui import render_crises_panel
 from game.diplomatic_pact_ui import render_diplomatic_pacts_panel
 from game.external_pressure_ui import render_external_pressure_panel
 from game.hunger_ui import render_hunger_panel
@@ -50,7 +49,6 @@ st.set_page_config(
 )
 
 _ORIGINAL_CREATE_REPOSITORY = repository_factory.create_repository
-_ORIGINAL_MULTIPLAYER_SERVICE = multiplayer_module.MultiplayerGameService
 
 
 @st.cache_resource
@@ -151,20 +149,6 @@ def _runtime_create_repository(*args, **kwargs):
     return runtime_repo, backend_label
 
 
-class _CrisisAwareMultiplayerService(_ORIGINAL_MULTIPLAYER_SERVICE):
-    """Adaptateur UI : remplace une action normale par la mission de crise choisie."""
-
-    def submit_orders(self, player_id, orders):
-        payload = st.session_state.get(CRISIS_OVERRIDE_KEY)
-        if payload:
-            state = self.repository.get_game_state(PRODUCTION_GAME_ID)
-            orders = apply_crisis_override(state, orders, payload)
-        result = super().submit_orders(player_id, orders)
-        if payload:
-            st.session_state.pop(CRISIS_OVERRIDE_KEY, None)
-        return result
-
-
 if mode == PRODUCTION_MODE:
     _restore_persistent_session(backend)
 else:
@@ -190,17 +174,14 @@ else:
             REQUIRED_CLANS,
         )
         _assign_workshop_players(runtime_repo)
-        st.session_state.pop(CRISIS_OVERRIDE_KEY, None)
         st.rerun()
 
 ui_path = Path(__file__).with_name("game_ui.py")
 repository_factory.create_repository = _runtime_create_repository
-multiplayer_module.MultiplayerGameService = _CrisisAwareMultiplayerService
 try:
     exec(compile(ui_path.read_text(encoding="utf-8"), str(ui_path), "exec"), globals(), globals())
 finally:
     repository_factory.create_repository = _ORIGINAL_CREATE_REPOSITORY
-    multiplayer_module.MultiplayerGameService = _ORIGINAL_MULTIPLAYER_SERVICE
 
 if "state" in globals() and "player_clan" in globals() and player_clan:
     render_coteries_panel(state, player_clan)
