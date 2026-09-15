@@ -54,6 +54,7 @@ def _character_to_dict(character: Character) -> dict:
         "mortal_stance": character.mortal_stance.value,
         "order_stance": character.order_stance.value,
         "humanity": character.humanity,
+        "hunger": character.hunger,
         "status": character.status,
         "reputation": character.reputation,
         "political_ambition": character.political_ambition.value,
@@ -120,6 +121,7 @@ def _character_from_dict(value: dict, default_sheet: Character | None = None) ->
     background_default = default_sheet.backgrounds if default_sheet else {}
     relations_default = default_sheet.relations if default_sheet else {}
     humanity_default = default_sheet.humanity if default_sheet else 7
+    hunger_default = default_sheet.hunger if default_sheet else 1
     status_default = default_sheet.status if default_sheet else 1
     reputation_default = default_sheet.reputation if default_sheet else 0
     political_ambition_default = (
@@ -136,6 +138,14 @@ def _character_from_dict(value: dict, default_sheet: Character | None = None) ->
     if not 0 <= humanity_value <= 10:
         humanity_value = humanity_default
 
+    hunger_value = value.get("hunger", hunger_default)
+    try:
+        hunger_value = int(hunger_value)
+    except (TypeError, ValueError):
+        hunger_value = hunger_default
+    if not 0 <= hunger_value <= 5:
+        hunger_value = hunger_default
+
     return Character(
         id=value["id"],
         name=value["name"],
@@ -144,6 +154,7 @@ def _character_from_dict(value: dict, default_sheet: Character | None = None) ->
         mortal_stance=_mortal_stance(value, default_sheet),
         order_stance=_order_stance(value, default_sheet),
         humanity=humanity_value,
+        hunger=hunger_value,
         status=int(value.get("status", status_default)),
         reputation=int(value.get("reputation", reputation_default)),
         political_ambition=PoliticalAmbition(

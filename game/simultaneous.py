@@ -15,7 +15,7 @@ from .config import DEFAULT_RULES, GameRules
 from .coteries import initialize_coteries
 from .domains import open_domain_dispute
 from .factions import initialize_factions
-from .models import ClanFactionSide, GameAction, GameEvent, GameState
+from .models import ActionType, ClanFactionSide, GameAction, GameEvent, GameState
 from .social_politics import add_grievance
 
 
@@ -41,23 +41,16 @@ def resolve_actions_simultaneously(
     actions: list[GameAction],
     rules: GameRules = DEFAULT_RULES,
 ) -> list[GameEvent]:
-    """Évalue toutes les actions sur un snapshot puis applique leurs effets cumulés.
-
-    Les modifications numériques s'additionnent depuis le même état initial. Les
-    changements de faction contradictoires sur une même cible s'annulent et la
-    cible conserve sa faction de début de phase. Les nouveaux griefs et litiges
-    sont recréés via leurs APIs afin de conserver des identifiants uniques.
-    """
+    """Évalue toutes les actions sur un snapshot puis applique leurs effets cumulés."""
 
     if not actions:
         return []
 
-    # Les liens canoniques doivent déjà exister avant de figer le snapshot, sinon
-    # leur initialisation dans chaque simulation serait elle-même comptée en delta.
     initialize_coteries(state)
     baseline = deepcopy(state)
 
     influence_delta: dict[str, float] = defaultdict(float)
+    hunger_delta: dict[str, int] = defaultdict(int)
     primogen_relation_delta: dict[str, int] = defaultdict(int)
     personal_relation_delta: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
     clan_relation_delta: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
@@ -73,11 +66,34 @@ def resolve_actions_simultaneously(
     for action in sorted(actions, key=_action_key):
         trial = deepcopy(baseline)
         event = apply_action(trial, action, rules)
+
+        # Un braconnage qui augmente réellement la pression a réussi à exploiter
+        # le Viandis : il nourrit donc le vampire, même s'il a été détecté.
+        if (
+            action.action_type == ActionType.BRACONNAGE
+            and action.target_domain_id in baseline.domains
+            and trial.domains[action.target_domain_id].pressure
+            > baseline.domains[action.target_domain_id].pressure
+        ):
+            actor_id = action.actor_character_id or trial.clan_states[action.clan_id].clan.primogen_id
+            actor = trial.characters[actor_id]
+            before_hunger = actor.hunger
+            actor.hunger = max(0, actor.hunger - 2)
+            event = GameEvent(
+                night=event.night,
+                category=event.category,
+                message=(
+                    f"{event.message} L'alimentation clandestine apaise sa Faim "
+                    f"({before_hunger} → {actor.hunger})."
+                ),
+                audience_clan_ids=event.audience_clan_ids,
+            )
         events.append(event)
 
         for character_id, before in baseline.characters.items():
             after = trial.characters[character_id]
             influence_delta[character_id] += after.personal_influence - before.personal_influence
+            hunger_delta[character_id] += after.hunger - before.hunger
             primogen_relation_delta[character_id] += (
                 after.relation_to_primogen - before.relation_to_primogen
             )
@@ -140,13 +156,12 @@ def resolve_actions_simultaneously(
         for dispute_id in set(trial.domain_disputes) - set(baseline.domain_disputes):
             new_disputes.append(deepcopy(trial.domain_disputes[dispute_id]))
 
-    # Les deltas sont appliqués depuis le snapshot, jamais depuis le résultat de
-    # l'action précédente. Deux effets opposés peuvent donc réellement s'annuler.
     for character_id, before in baseline.characters.items():
         character = state.characters[character_id]
         character.personal_influence = max(
             0.0, before.personal_influence + influence_delta[character_id]
         )
+        character.hunger = _clamp(before.hunger + hunger_delta[character_id], 0, 5)
         character.relation_to_primogen = _clamp(
             before.relation_to_primogen + primogen_relation_delta[character_id], 0, 2
         )
@@ -187,7 +202,6 @@ def resolve_actions_simultaneously(
         if len(proposals) == 1:
             state.clan_states[clan_id].faction_memberships[character_id] = next(iter(proposals))
         else:
-            # Deux manœuvres incompatibles de la même nuit se neutralisent.
             original = baseline.clan_states[clan_id].faction_memberships.get(character_id)
             if original is not None:
                 state.clan_states[clan_id].faction_memberships[character_id] = original

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from .hunger import hunger_penalty
 from .models import Character, CharacterAttribute
 
 
@@ -8,11 +9,14 @@ EXPERTISE_BONUS = 1
 
 def attribute_value(character: Character, attribute: CharacterAttribute | str) -> int:
     attribute = CharacterAttribute(attribute)
-    return {
+    raw = {
         CharacterAttribute.PHYSICAL: character.physical,
         CharacterAttribute.SOCIAL: character.social,
         CharacterAttribute.MENTAL: character.mental,
     }[attribute]
+    if attribute in {CharacterAttribute.SOCIAL, CharacterAttribute.MENTAL}:
+        return max(0, raw - hunger_penalty(character.hunger))
+    return raw
 
 
 def has_expertise(character: Character, expertise: str) -> bool:
@@ -28,10 +32,10 @@ def action_score(
     discipline: str | None = None,
     background: str | None = None,
 ) -> int:
-    """Calcule Caractéristique + Expertise (+1) + Discipline OU Historique.
+    """Calcule Caractéristique effective + Expertise (+1) + Discipline OU Historique.
 
-    Discipline et Historique sont mutuellement exclusifs pour garder la résolution
-    volontairement compacte. Une expertise non possédée n'ajoute aucun bonus.
+    La Faim 4–5 réduit les caractéristiques sociales et mentales effectives. Discipline
+    et Historique restent mutuellement exclusifs pour garder la résolution compacte.
     """
     if discipline is not None and background is not None:
         raise ValueError("An action may use a discipline or a background, not both")
