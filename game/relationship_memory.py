@@ -64,13 +64,14 @@ def memory_for(state: Any, npc_id: str | None, character: Any) -> RelationshipMe
         disposition = 0
 
     trust_default = _bounded(character.sire_relation - 1) if npc_id == character.sire_id else 0
+    awareness = max(0, min(5, _metric(relations, "awareness", character.character_id, 1)))
     known_facts = [f"Nom : {character.name}", f"Clan : {character.clan_id.title()}"]
     if npc_id == character.sire_id:
         known_facts.extend(("Lien : sire", "Position initiale : infant sous responsabilité"))
-    if _metric(relations, "awareness", character.character_id, 0) >= 2:
+    if awareness >= 2:
         known_facts.append(f"Sire connu : {character.sire_name}")
-    if _metric(relations, "awareness", character.character_id, 0) >= 3:
-        known_facts.append(f"Réputation publique : {character.reputation:+d}")
+    if awareness >= 3:
+        known_facts.append("Votre réputation générale lui est connue")
 
     last_year = _metric(relations, "lastyear", character.character_id, 0)
     return RelationshipMemoryState(
@@ -80,7 +81,7 @@ def memory_for(state: Any, npc_id: str | None, character: Any) -> RelationshipMe
         trust=_bounded(_metric(relations, "trust", character.character_id, trust_default)),
         respect=_bounded(_metric(relations, "respect", character.character_id, 0)),
         fear=_bounded(_metric(relations, "fear", character.character_id, 0), 0, 3),
-        awareness=max(0, min(5, _metric(relations, "awareness", character.character_id, 1))),
+        awareness=awareness,
         grievance_count=max(0, _metric(relations, "grievances", character.character_id, 0)),
         last_interaction_year=last_year or None,
         known_facts=tuple(known_facts),
