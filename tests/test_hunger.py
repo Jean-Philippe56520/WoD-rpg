@@ -8,7 +8,12 @@ from game.hunger import (
     resolve_hunger,
 )
 from game.models import ActionType, Character, CharacterAttribute, GameAction
-from game.serialization import game_state_from_dict, game_state_from_json, game_state_to_dict, game_state_to_json
+from game.serialization import (
+    game_state_from_dict,
+    game_state_from_json,
+    game_state_to_dict,
+    game_state_to_json,
+)
 from game.simultaneous import resolve_actions_simultaneously
 from game.world import create_initial_game_state
 
@@ -89,18 +94,18 @@ def test_high_hunger_penalises_social_and_mental_but_not_physical():
 
 def test_successful_braconnage_feeds_before_end_of_night_hunger_pressure():
     state = create_initial_game_state()
-    gabriel = state.characters["toreador_gabriel"]
-    gabriel.hunger = 4
+    victor = state.characters["ventrue_victor"]
+    victor.hunger = 4
     action = GameAction(
-        clan_id="toreador",
+        clan_id="ventrue",
         action_type=ActionType.BRACONNAGE,
-        actor_character_id=gabriel.id,
+        actor_character_id=victor.id,
         target_domain_id="docks",
     )
 
     events = resolve_actions_simultaneously(state, [action])
-    assert gabriel.hunger == 2
+    assert victor.hunger == 2
     assert any("apaise sa Faim" in event.message for event in events)
 
     resolve_hunger(state)
-    assert gabriel.hunger == 3
+    assert victor.hunger == 3
