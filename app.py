@@ -17,6 +17,7 @@ from game.browser_session import (
     read_device_refresh_token,
 )
 from game.coterie_ui import render_coteries_panel
+from game.court_ui import render_court_panel
 from game.runtime import (
     PRODUCTION_GAME_ID,
     PRODUCTION_MODE,
@@ -68,9 +69,6 @@ def _restore_persistent_session(backend: str) -> None:
         st.session_state.pop(AUTH_SESSION_KEY, None)
         session = None
 
-    # Si cette même session Streamlit avait déjà un utilisateur authentifié et
-    # que game_ui vient de supprimer AUTH_SESSION_KEY, il s'agit d'une déconnexion
-    # explicite (ou d'une invalidation). On purge l'appareil au lieu de reconnecter.
     if session is None and st.session_state.get(AUTH_SEEN_KEY):
         st.session_state[AUTH_SEEN_KEY] = False
         clear_device_refresh_token()
@@ -128,7 +126,7 @@ mode = st.sidebar.radio(
     format_func=lambda value: "Chronique" if value == PRODUCTION_MODE else "Atelier (test/dev)",
     key="wod_runtime_mode_selector",
 )
-st.sidebar.caption("Moteur V0.11 — coteries et loyautés croisées")
+st.sidebar.caption("Moteur V0.12 — Prince autonome et agenda de Cour")
 set_runtime_mode(mode)
 
 try:
@@ -142,8 +140,6 @@ backend_label = RuntimeBackendLabel(backend)
 
 
 def _runtime_create_repository(*args, **kwargs):
-    # Le dépôt de base a déjà été créé avant l'installation du proxy.
-    # Toutes les opérations de l'UI passent ensuite par la barrière runtime.
     return runtime_repo, backend_label
 
 
@@ -174,10 +170,6 @@ else:
         _assign_workshop_players(runtime_repo)
         st.rerun()
 
-# L'interface historique reste commune aux deux modes. Le proxy runtime décide
-# de la partie réellement visée et le Mode Atelier contourne uniquement l'auth UI,
-# jamais les règles du moteur. L'injection est restaurée dans tous les cas afin
-# de ne jamais polluer le module repository_factory au-delà de ce rendu Streamlit.
 ui_path = Path(__file__).with_name("game_ui.py")
 repository_factory.create_repository = _runtime_create_repository
 try:
@@ -185,9 +177,6 @@ try:
 finally:
     repository_factory.create_repository = _ORIGINAL_CREATE_REPOSITORY
 
-# La V0.11 ajoute sa vue sans dupliquer la grande interface historique. Les
-# variables ``state`` et ``player_clan`` sont créées par game_ui uniquement après
-# authentification/attribution du clan ; en lobby ou lors d'un st.stop, ce bloc
-# n'est donc pas exécuté.
 if "state" in globals() and "player_clan" in globals() and player_clan:
     render_coteries_panel(state, player_clan)
+    render_court_panel(state, player_clan)
