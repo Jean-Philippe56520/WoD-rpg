@@ -6,6 +6,7 @@ from .chronicle import CLAN_LABELS, OFFICE_LABELS
 from .chronicle_politics import primary_office
 from .chronicle_service import ChronicleService, chronicle_time_label, ellipse_label
 from .chronicle_world_store import ChronicleWorldStore
+from .dice import difficulty_band
 from .night_cycle import (
     NightPhase,
     available_situations,
@@ -16,6 +17,39 @@ from .night_cycle import (
     time_remaining_text,
 )
 from .night_cycle_store import NightCycleStore
+from .situations import action_risk_preview
+
+
+ATTRIBUTE_LABELS = {
+    "strength": "Force",
+    "dexterity": "Dextérité",
+    "stamina": "Vigueur",
+    "charisma": "Charisme",
+    "manipulation": "Manipulation",
+    "composure": "Sang-froid",
+    "intelligence": "Intelligence",
+    "wits": "Astuce",
+    "resolve": "Résolution",
+}
+
+SKILL_LABELS = {
+    "athletics": "Athlétisme",
+    "awareness": "Vigilance",
+    "brawl": "Bagarre",
+    "stealth": "Furtivité",
+    "insight": "Perspicacité",
+    "persuasion": "Persuasion",
+    "subterfuge": "Subterfuge",
+    "etiquette": "Étiquette",
+    "academics": "Érudition",
+    "occult": "Occultisme",
+    "politics": "Politique",
+    "survival": "Survie",
+}
+
+
+def _label(mapping: dict[str, str], value: str) -> str:
+    return mapping.get(value, value.replace("_", " ").title())
 
 
 def _situation_for_id(
@@ -45,7 +79,14 @@ def _situation_for_id(
     )
 
 
-def _render_choice_form(situation, *, key_prefix: str, submit_label: str):
+def _render_choice_form(
+    situation,
+    character,
+    simulation,
+    *,
+    key_prefix: str,
+    submit_label: str,
+):
     with st.form(f"{key_prefix}_{situation.id}"):
         choice_id = st.radio(
             "Votre décision",
@@ -56,7 +97,13 @@ def _render_choice_form(situation, *, key_prefix: str, submit_label: str):
             key=f"{key_prefix}_choice_{situation.id}",
         )
         selected = next(choice for choice in situation.choices if choice.id == choice_id)
+        preview = action_risk_preview(character, simulation, situation, selected)
         st.caption(selected.description)
+        st.caption(
+            f"Approche : {_label(ATTRIBUTE_LABELS, preview.attribute)} + "
+            f"{_label(SKILL_LABELS, preview.skill)} · Risque estimé : **{preview.band.title()}**"
+        )
+        st.caption(preview.hint)
         free_intent = st.text_area(
             "Précision libre",
             placeholder="Votre manière d'agir, ce que vous cachez, ce que vous cherchez vraiment…",
@@ -75,7 +122,7 @@ def _step_notice(result) -> str:
     dice = result.resolution.dice
     return (
         f"{result.resolution.outcome.summary} {result.resolution.outcome.detail} "
-        f"{result.consequence} [{dice.successes} succès sur difficulté {dice.difficulty}]"
+        f"{result.consequence} [{dice.successes} succès · risque {difficulty_band(dice.difficulty)}]"
     )
 
 
@@ -243,6 +290,8 @@ def render_night_cycle(
             st.write(event.body)
             play, choice_id, free_intent = _render_choice_form(
                 event,
+                character,
+                simulation,
                 key_prefix=(
                     f"night_event_{character.chapter}_{character.segment}_{character.local_night}"
                 ),
@@ -304,6 +353,8 @@ def render_night_cycle(
                 st.write(situation.body)
                 play, choice_id, free_intent = _render_choice_form(
                     situation,
+                    character,
+                    simulation,
                     key_prefix=(
                         f"free_action_{character.chapter}_{character.segment}_"
                         f"{character.local_night}_{len(night_state.log)}_{index}"
@@ -353,7 +404,7 @@ def render_night_cycle(
 
 
 def install_night_cycle_ui() -> None:
-    """Install the V0.47 Chronicle time, night and emergent-intrigue renderers."""
+    """Install the V0.48b Chronicle time, night and hidden-risk renderers."""
 
     from . import chronicle_ui
 
