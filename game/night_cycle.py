@@ -48,6 +48,50 @@ def _same_night(character: PlayerCharacter, resolution: SituationResolution) -> 
     return replace(resolution, outcome=replace(resolution.outcome, updated_character=after))
 
 
+def _resolve_with_step_nonce(
+    character: PlayerCharacter,
+    profile,
+    simulation,
+    situation: Situation,
+    choice_id: str,
+    *,
+    nights_per_segment: int,
+    free_intent: str,
+    step_nonce: str,
+) -> SituationResolution:
+    """Keep deterministic rolls while avoiding identical rolls for repeated actions.
+
+    ``resolve_situation`` seeds dice from situation/choice/night identifiers. Inside
+    V0.45 a player may perform the same action twice during one night, so a stable
+    step nonce is injected into the selected choice id for the roll only. The
+    public resolution is restored to the canonical situation and choice ids.
+    """
+
+    try:
+        canonical_choice = next(item for item in situation.choices if item.id == choice_id)
+    except StopIteration as exc:
+        raise ValueError("Unknown situation choice") from exc
+
+    seeded_choice = replace(canonical_choice, id=f"{canonical_choice.id}@{step_nonce}")
+    seeded_situation = replace(
+        situation,
+        choices=tuple(
+            seeded_choice if item.id == canonical_choice.id else item
+            for item in situation.choices
+        ),
+    )
+    resolution = resolve_situation(
+        character,
+        profile,
+        simulation,
+        seeded_situation,
+        seeded_choice.id,
+        nights_per_segment=nights_per_segment,
+        free_intent=free_intent,
+    )
+    return replace(resolution, situation=situation, choice=canonical_choice)
+
+
 def choose_night_event(character: PlayerCharacter, profile, simulation, *, year: int) -> Situation:
     situations = generate_situations(character, profile, simulation, year=year)
     candidates = tuple(item for item in situations if not item.id.startswith("hunt_"))
@@ -72,7 +116,14 @@ def choose_night_event(character: PlayerCharacter, profile, simulation, *, year:
     return candidates[(character.chapter + character.segment + character.local_night) % len(candidates)]
 
 
-def free_action_situations(character: PlayerCharacter, profile, simulation, *, year: int, event_id: str) -> tuple[Situation, ...]:
+def free_action_situations(
+    character: PlayerCharacter,
+    profile,
+    simulation,
+    *,
+    year: int,
+    event_id: str,
+) -> tuple[Situation, ...]:
     return tuple(
         item
         for item in generate_situations(character, profile, simulation, year=year)
@@ -85,7 +136,9 @@ def _event_budget(character: PlayerCharacter, resolution: SituationResolution) -
     effect = resolution.choice.effect
     if effect == "sire_refuse" and not dice.success:
         memory = memory_for(resolution.simulation, resolution.situation.source_actor_id, character)
-        severe = resolution.outcome.updated_character.sire_relation <= 1 or (memory is not None and memory.grievance_count >= 2)
+        severe = resolution.outcome.updated_character.sire_relation <= 1 or (
+            memory is not None and memory.grievance_count >= 2
+        )
         if severe or dice.bestial_failure:
             return 0, "Votre sire transforme le conflit en sanction et vous retient jusqu'à l'approche de l'aube."
         return 0, "Le conflit avec votre sire consume le reste de la nuit."
@@ -102,10 +155,19 @@ def _event_budget(character: PlayerCharacter, resolution: SituationResolution) -
     return 0, "L'échec et ses conséquences consument le temps restant avant l'aube."
 
 
-def resolve_night_event(character: PlayerCharacter, profile, simulation, situation: Situation, choice_id: str, *, nights_per_segment: int, free_intent: str = "") -> NightStepResult:
+def resolve_night_event(
+    character: PlayerCharacter,
+    profile,
+    simulation,
+    situation: Situation,
+    choice_id: str,
+    *,
+    nights_per_segment: int,
+    free_intent: str = "",
+) -> NightStepResult:
     resolution = _same_night(
         character,
-        resolve_situation(
+        _resolve_with_step_nonce(
             character,
             profile,
             simulation,
@@ -113,18 +175,32 @@ def resolve_night_event(character: PlayerCharacter, profile, simulation, situati
             choice_id,
             nights_per_segment=nights_per_segment,
             free_intent=free_intent,
+            step_nonce="event",
         ),
     )
     remaining, consequence = _event_budget(character, resolution)
     return NightStepResult(resolution, remaining, consequence)
 
 
-def resolve_free_action(character: PlayerCharacter, profile, simulation, situation: Situation, choice_id: str, *, nights_per_segment: int, remaining_actions: int, free_intent: str = "") -> NightStepResult:
+def resolve_free_action(
+    character: PlayerCharacter,
+    profile,
+    simulation,
+    situation: Situation,
+    choice_id: str,
+    *,
+    nights_per_segment: int,
+    remaining_actions: int,
+    action_index: int = 1,
+    free_intent: str = "",
+) -> NightStepResult:
     if remaining_actions <= 0:
         raise ValueError("No free action remains this night")
+    if action_index < 1:
+        raise ValueError("Free action index must be positive")
     resolution = _same_night(
         character,
-        resolve_situation(
+        _resolve_with_step_nonce(
             character,
             profile,
             simulation,
@@ -132,6 +208,7 @@ def resolve_free_action(character: PlayerCharacter, profile, simulation, situati
             choice_id,
             nights_per_segment=nights_per_segment,
             free_intent=free_intent,
+            step_nonce=f"free:{action_index}",
         ),
     )
     cost = remaining_actions if situation.id.startswith("hunt_") and choice_id == "careful_hunt" else 1
