@@ -58,6 +58,7 @@ def test_ancienne_sauvegarde_complete_les_competences_manquantes_sans_perdre_les
     data.pop("specialties")
     data.pop("health_superficial")
     data.pop("health_aggravated")
+    data.pop("humanity_stains")
     data["schema_version"] = 2
 
     migrated = profile_from_dict(data)
@@ -69,7 +70,8 @@ def test_ancienne_sauvegarde_complete_les_competences_manquantes_sans_perdre_les
     assert migrated.specialties == {}
     assert migrated.health_superficial == 0
     assert migrated.health_aggravated == 0
-    assert migrated.schema_version == 3
+    assert migrated.humanity_stains == 0
+    assert migrated.schema_version == 4
 
 
 def test_specialite_pertinente_ajoute_exactement_un_de():
@@ -128,7 +130,6 @@ def test_degats_supplementaires_sur_piste_pleine_convertissent_les_superficiels_
 
     result = appliquer_degats_sante(plein, 2, TypeDegat.SUPERFICIEL)
 
-    # 2 dégâts superficiels bruts deviennent 1 niveau après division V5.
     assert result.superficiels_convertis == 1
     assert result.profile.health_superficial == profile.sante_maximale - 1
     assert result.profile.health_aggravated == 1
