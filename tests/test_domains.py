@@ -2,7 +2,7 @@ import pytest
 
 from game.actions import apply_action
 from game.domains import (
-    active_hunting_rights,
+    assign_domain_holder,
     expire_hunting_rights,
     grant_hunting_right,
     has_hunting_access,
@@ -226,3 +226,34 @@ def test_primogen_succession_does_not_transfer_personal_domain_to_successor():
     assert state.prince_id == "primogen_ventrue"
     assert state.clan_states["ventrue"].clan.primogen_id != "primogen_ventrue"
     assert state.domains["quartier_affaires"].holder_id == "primogen_ventrue"
+
+
+def test_only_recognized_prince_can_reassign_domain_and_old_holder_can_contest():
+    state = create_initial_game_state()
+    with pytest.raises(ValueError, match="recognized Prince"):
+        assign_domain_holder(
+            state,
+            domain_id="vieux_centre",
+            new_holder_id="ventrue_victor",
+            granted_by_id="primogen_ventrue",
+        )
+
+    winner = next(
+        candidate for candidate in candidates_from_state(state) if candidate.id == "primogen_ventrue"
+    )
+    install_prince(state, winner)
+    assign_domain_holder(
+        state,
+        domain_id="vieux_centre",
+        new_holder_id="ventrue_victor",
+        granted_by_id="primogen_ventrue",
+    )
+
+    assert state.domains["vieux_centre"].holder_id == "ventrue_victor"
+    assert state.domains["vieux_centre"].grantor_id == "primogen_ventrue"
+    assert any(
+        dispute.domain_id == "vieux_centre"
+        and dispute.claimant_id == "ventrue_claire"
+        and dispute.public
+        for dispute in state.domain_disputes.values()
+    )
