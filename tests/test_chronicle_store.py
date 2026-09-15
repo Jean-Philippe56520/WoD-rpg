@@ -98,7 +98,7 @@ def test_convergence_waits_until_every_active_character_is_ready(tmp_path):
     assert not first_after.ready_for_convergence
 
 
-def test_end_of_chapter_applies_historical_ellipse(tmp_path):
+def test_end_of_chapter_applies_ellipse_and_rewards_objective(tmp_path):
     store, progress = make_store(tmp_path)
     character = make_character(progress)
     store.create_character(character)
@@ -109,6 +109,14 @@ def test_end_of_chapter_applies_historical_ellipse(tmp_path):
             outcome = resolve_personal_night(current, action)
             current = store.advance_personal_night(current, outcome)
         assert current.ready_for_convergence
+
+        if expected_segment == 3:
+            with store.repository._connect() as con:
+                con.execute(
+                    "UPDATE wod_player_characters SET goal_progress = 7 WHERE game_id = ? AND player_id = ?",
+                    (CHRONICLE_GAME_ID, "player-1"),
+                )
+
         next_progress = store.resolve_convergence(CHRONICLE_GAME_ID)
         current = store.get_character(CHRONICLE_GAME_ID, "player-1")
         assert current is not None
@@ -120,3 +128,7 @@ def test_end_of_chapter_applies_historical_ellipse(tmp_path):
     assert next_progress.year == 1437
     assert current.chronicle_year == 1437
     assert current.goal_progress == 0
+    assert current.experience == 2
+    assert current.status == 1
+    assert current.reputation >= 1
+    assert current.personal_influence >= 1.0
