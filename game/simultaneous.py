@@ -15,6 +15,7 @@ from .config import DEFAULT_RULES, GameRules
 from .coteries import initialize_coteries
 from .domains import open_domain_dispute
 from .factions import initialize_factions
+from .information import investigation_rumor_event
 from .models import ActionType, ClanFactionSide, GameAction, GameEvent, GameState
 from .social_politics import add_grievance
 
@@ -34,6 +35,33 @@ def _action_key(action: GameAction) -> tuple[str, str, str, str, str, str]:
         action.target_clan_id or "",
         action.target_domain_id or "",
     )
+
+
+def _investigation_subject(state: GameState, action: GameAction) -> str | None:
+    if action.target_character_id:
+        return action.target_character_id
+    target_clan_id = action.target_clan_id
+    if not target_clan_id or target_clan_id not in state.clan_states:
+        return None
+    target_primogen_id = state.clan_states[target_clan_id].clan.primogen_id
+    candidates = [
+        character
+        for character in state.characters.values()
+        if character.clan_id == target_clan_id
+        and character.id != target_primogen_id
+        and character.id != state.prince_id
+    ]
+    if not candidates:
+        return None
+    intel = state.clan_states[action.clan_id].known_character_intel
+    return min(
+        candidates,
+        key=lambda character: (
+            intel.get(character.id, 0),
+            -character.personal_influence,
+            character.id,
+        ),
+    ).id
 
 
 def resolve_actions_simultaneously(
@@ -67,8 +95,6 @@ def resolve_actions_simultaneously(
         trial = deepcopy(baseline)
         event = apply_action(trial, action, rules)
 
-        # Un braconnage qui augmente réellement la pression a réussi à exploiter
-        # le Viandis : il nourrit donc le vampire, même s'il a été détecté.
         if (
             action.action_type == ActionType.BRACONNAGE
             and action.target_domain_id in baseline.domains
@@ -89,6 +115,25 @@ def resolve_actions_simultaneously(
                 audience_clan_ids=event.audience_clan_ids,
             )
         events.append(event)
+
+        # Une enquête réellement réussie produit également un renseignement imparfait.
+        # La rumeur est basée sur le même snapshot que les autres missions et devient
+        # persistante lorsque les événements retournés sont ajoutés à l'historique.
+        if (
+            action.action_type == ActionType.INVESTIGATE
+            and "obtient de nouveaux renseignements" in event.message
+        ):
+            subject_id = _investigation_subject(baseline, action)
+            actor_id = action.actor_character_id or baseline.clan_states[action.clan_id].clan.primogen_id
+            if subject_id:
+                events.append(
+                    investigation_rumor_event(
+                        baseline,
+                        action.clan_id,
+                        subject_id,
+                        actor_id,
+                    )
+                )
 
         for character_id, before in baseline.characters.items():
             after = trial.characters[character_id]
