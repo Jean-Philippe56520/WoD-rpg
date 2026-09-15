@@ -137,11 +137,11 @@ def _default_conviction(character: PlayerCharacter) -> str:
 
 
 def _default_road(character: PlayerCharacter) -> str:
-    if character.order_stance == "orthodox":
-        return "regalis"
     if character.mortal_stance == "humanist":
         return "humanitatis"
-    return "via_mutationis"
+    if character.order_stance == "orthodox":
+        return "regalis"
+    return "bestiae"
 
 
 def default_profile(character: PlayerCharacter) -> VampireProfile:
