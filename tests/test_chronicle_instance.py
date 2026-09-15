@@ -114,14 +114,23 @@ def test_legacy_shared_character_is_copied_to_personal_chronicle_without_deletin
         character_id="pc-legacy",
         name="Jehan",
     )
+    other_legacy_character = make_character(
+        legacy_progress,
+        player_id="player-2",
+        character_id="pc-other",
+        name="Aelis",
+    )
     store.create_character(legacy_character)
+    store.create_character(other_legacy_character)
 
     profile_store = VampireProfileStore(repo)
     legacy_profile = profile_store.ensure_for_character(legacy_character)
 
     simulation_store = ChronicleSimulationStore(repo)
     legacy_simulation = simulation_store.ensure(CHRONICLE_GAME_ID, year=legacy_progress.year)
-    simulation_store.save(ensure_character_links(legacy_simulation, legacy_character))
+    legacy_simulation = ensure_character_links(legacy_simulation, legacy_character)
+    legacy_simulation = ensure_character_links(legacy_simulation, other_legacy_character)
+    simulation_store.save(legacy_simulation)
 
     outcome = resolve_personal_night(legacy_character, PersonalAction.INVESTIGATE)
     legacy_after_night = store.advance_personal_night(legacy_character, outcome)
@@ -136,6 +145,7 @@ def test_legacy_shared_character_is_copied_to_personal_chronicle_without_deletin
     assert migrated.character_id == legacy_character.character_id
     assert migrated.local_night == 2
     assert migrated.game_id == context.game_id
+    assert store.get_character(context.game_id, "player-2") is None
 
     migrated_profile = profile_store.get(context.game_id, migrated.character_id)
     assert migrated_profile is not None
@@ -147,7 +157,9 @@ def test_legacy_shared_character_is_copied_to_personal_chronicle_without_deletin
     assert migrated_history[0]["action"] == PersonalAction.INVESTIGATE.value
 
     source = store.get_character(CHRONICLE_GAME_ID, "player-1")
+    source_other = store.get_character(CHRONICLE_GAME_ID, "player-2")
     assert source is not None
+    assert source_other is not None
     assert source.game_id == CHRONICLE_GAME_ID
     assert source.local_night == 2
 
@@ -157,4 +169,17 @@ def test_legacy_shared_character_is_copied_to_personal_chronicle_without_deletin
     assert any(
         right.beneficiary_id == migrated.character_id
         for right in migrated_simulation.hunting_rights.values()
+    )
+    assert all(
+        right.beneficiary_id != other_legacy_character.character_id
+        and right.granted_by_id != other_legacy_character.character_id
+        for right in migrated_simulation.hunting_rights.values()
+    )
+    assert all(
+        domain.holder_id != other_legacy_character.character_id
+        for domain in migrated_simulation.domains.values()
+    )
+    assert all(
+        holder_id != other_legacy_character.character_id
+        for holder_id in migrated_simulation.offices.values()
     )
