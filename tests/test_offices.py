@@ -31,6 +31,19 @@ def test_successor_selection_uses_coterie_influence_and_personal_position():
     assert state.clan_states["ventrue"].clan.primogen_id == "ventrue_victor"
 
 
+def test_relations_to_primogen_are_rebased_on_new_holder_after_succession():
+    state = create_initial_game_state()
+    state.characters["ventrue_helene"].relations["ventrue_victor"] = 2
+    state.characters["ventrue_claire"].relation_to_primogen = 0
+
+    install_prince(state, ventrue_winner(state))
+
+    assert state.clan_states["ventrue"].clan.primogen_id == "ventrue_victor"
+    assert state.characters["ventrue_victor"].relation_to_primogen == 2
+    assert state.characters["ventrue_helene"].relation_to_primogen == 2
+    assert state.characters["ventrue_claire"].relation_to_primogen == 1
+
+
 def test_opposition_candidate_can_take_primogeniture_if_balance_changes():
     state = create_initial_game_state()
     state.characters["ventrue_claire"].personal_influence = 100
