@@ -143,11 +143,7 @@ class ChronicleStore:
             order_stance=str(row["order_stance"]),
             experience=int(row.get("experience", 0)),
             office=str(row.get("office", "none")),
-            lineage_parent_id=(
-                str(row["lineage_parent_id"])
-                if row.get("lineage_parent_id") is not None
-                else None
-            ),
+            lineage_parent_id=(str(row["lineage_parent_id"]) if row.get("lineage_parent_id") is not None else None),
             ready_for_convergence=bool(row["ready_for_convergence"]),
             is_active=bool(row["is_active"]),
         )
@@ -169,21 +165,11 @@ class ChronicleStore:
         else:
             with self.repository._connect() as con:
                 con.execute(
-                    """
-                    INSERT INTO wod_chronicle_progress(
-                        game_id,year,chapter,segment,nights_per_segment,
-                        segments_per_chapter,ellipse_years
-                    ) VALUES(?,?,?,?,?,?,?)
-                    """,
-                    (
-                        progress.game_id,
-                        progress.year,
-                        progress.chapter,
-                        progress.segment,
-                        progress.nights_per_segment,
-                        progress.segments_per_chapter,
-                        progress.ellipse_years,
-                    ),
+                    """INSERT INTO wod_chronicle_progress(
+                        game_id,year,chapter,segment,nights_per_segment,segments_per_chapter,ellipse_years
+                    ) VALUES(?,?,?,?,?,?,?)""",
+                    (progress.game_id, progress.year, progress.chapter, progress.segment,
+                     progress.nights_per_segment, progress.segments_per_chapter, progress.ellipse_years),
                 )
         return progress
 
@@ -192,15 +178,11 @@ class ChronicleStore:
             rows = self.repository.client.select(
                 "wod_chronicle_progress",
                 "game_id,year,chapter,segment,nights_per_segment,segments_per_chapter,ellipse_years",
-                filters={"game_id": game_id},
-                limit=1,
+                filters={"game_id": game_id}, limit=1,
             )
             return self._progress_from_row(rows[0]) if rows else None
         with self.repository._connect() as con:
-            row = con.execute(
-                "SELECT * FROM wod_chronicle_progress WHERE game_id = ?",
-                (game_id,),
-            ).fetchone()
+            row = con.execute("SELECT * FROM wod_chronicle_progress WHERE game_id = ?", (game_id,)).fetchone()
         return self._progress_from_row(dict(row)) if row else None
 
     def create_character(self, character: PlayerCharacter) -> None:
@@ -221,32 +203,24 @@ class ChronicleStore:
     def get_character(self, game_id: str, player_id: str) -> PlayerCharacter | None:
         if self._is_supabase:
             rows = self.repository.client.select(
-                "wod_player_characters",
-                "*",
-                filters={"game_id": game_id, "player_id": player_id},
-                limit=1,
+                "wod_player_characters", "*", filters={"game_id": game_id, "player_id": player_id}, limit=1
             )
             return self._character_from_row(rows[0]) if rows else None
         with self.repository._connect() as con:
             row = con.execute(
-                "SELECT * FROM wod_player_characters WHERE game_id = ? AND player_id = ?",
-                (game_id, player_id),
+                "SELECT * FROM wod_player_characters WHERE game_id = ? AND player_id = ?", (game_id, player_id)
             ).fetchone()
         return self._character_from_row(dict(row)) if row else None
 
     def list_characters(self, game_id: str) -> list[PlayerCharacter]:
         if self._is_supabase:
             rows = self.repository.client.select(
-                "wod_player_characters",
-                "*",
-                filters={"game_id": game_id},
-                order="created_at.asc",
+                "wod_player_characters", "*", filters={"game_id": game_id}, order="created_at.asc"
             )
             return [self._character_from_row(row) for row in rows]
         with self.repository._connect() as con:
             rows = con.execute(
-                "SELECT * FROM wod_player_characters WHERE game_id = ? ORDER BY created_at, character_id",
-                (game_id,),
+                "SELECT * FROM wod_player_characters WHERE game_id = ? ORDER BY created_at, character_id", (game_id,)
             ).fetchall()
         return [self._character_from_row(dict(row)) for row in rows]
 
@@ -264,6 +238,7 @@ class ChronicleStore:
             "detail": outcome.detail,
             "tags": list(outcome.tags),
             "free_intent": free_intent.strip(),
+            "humanity": after.humanity,
         }
         if self._is_supabase:
             raw = self.repository.client.rpc(
@@ -301,47 +276,25 @@ class ChronicleStore:
                 raise ValueError("Unknown player character")
             current = self._character_from_row(dict(row))
             if (
-                current.chapter != before.chapter
-                or current.segment != before.segment
-                or current.local_night != before.local_night
-                or current.ready_for_convergence
+                current.chapter != before.chapter or current.segment != before.segment
+                or current.local_night != before.local_night or current.ready_for_convergence
             ):
                 raise ValueError("Character night changed before submission")
             con.execute(
-                """
-                INSERT INTO wod_character_night_history(
+                """INSERT INTO wod_character_night_history(
                     game_id,character_id,chapter,segment,night_number,action,outcome_json
-                ) VALUES(?,?,?,?,?,?,?)
-                """,
-                (
-                    before.game_id,
-                    before.character_id,
-                    before.chapter,
-                    before.segment,
-                    before.local_night,
-                    outcome.action.value,
-                    json.dumps(outcome_payload, ensure_ascii=False),
-                ),
+                ) VALUES(?,?,?,?,?,?,?)""",
+                (before.game_id, before.character_id, before.chapter, before.segment,
+                 before.local_night, outcome.action.value, json.dumps(outcome_payload, ensure_ascii=False)),
             )
             con.execute(
-                """
-                UPDATE wod_player_characters
-                SET local_night = ?, hunger = ?, reputation = ?, personal_influence = ?,
-                    sire_relation = ?, goal_progress = ?, ready_for_convergence = ?,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE game_id = ? AND player_id = ?
-                """,
-                (
-                    after.local_night,
-                    after.hunger,
-                    after.reputation,
-                    after.personal_influence,
-                    after.sire_relation,
-                    after.goal_progress,
-                    int(after.ready_for_convergence),
-                    before.game_id,
-                    before.player_id,
-                ),
+                """UPDATE wod_player_characters
+                SET local_night = ?, hunger = ?, humanity = ?, reputation = ?, personal_influence = ?,
+                    sire_relation = ?, goal_progress = ?, ready_for_convergence = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE game_id = ? AND player_id = ?""",
+                (after.local_night, after.hunger, after.humanity, after.reputation,
+                 after.personal_influence, after.sire_relation, after.goal_progress,
+                 int(after.ready_for_convergence), before.game_id, before.player_id),
             )
             con.commit()
         refreshed = self.get_character(before.game_id, before.player_id)
@@ -355,18 +308,14 @@ class ChronicleStore:
                 "wod_character_night_history",
                 "chapter,segment,night_number,action,outcome_json,created_at",
                 filters={"game_id": game_id, "character_id": character_id},
-                limit=limit,
-                order="created_at.desc",
+                limit=limit, order="created_at.desc",
             )
         with self.repository._connect() as con:
             rows = con.execute(
-                """
-                SELECT chapter,segment,night_number,action,outcome_json,created_at
+                """SELECT chapter,segment,night_number,action,outcome_json,created_at
                 FROM wod_character_night_history
                 WHERE game_id = ? AND character_id = ?
-                ORDER BY created_at DESC, chapter DESC, segment DESC, night_number DESC
-                LIMIT ?
-                """,
+                ORDER BY created_at DESC, chapter DESC, segment DESC, night_number DESC LIMIT ?""",
                 (game_id, character_id, limit),
             ).fetchall()
         result: list[dict[str, Any]] = []
@@ -381,11 +330,8 @@ class ChronicleStore:
         if progress is None:
             return False
         characters = [
-            character
-            for character in self.list_characters(game_id)
-            if character.is_active
-            and character.chapter == progress.chapter
-            and character.segment == progress.segment
+            character for character in self.list_characters(game_id)
+            if character.is_active and character.chapter == progress.chapter and character.segment == progress.segment
         ]
         return bool(characters) and all(character.ready_for_convergence for character in characters)
 
@@ -400,18 +346,13 @@ class ChronicleStore:
 
         with self.repository._connect() as con:
             con.execute("BEGIN IMMEDIATE")
-            progress_row = con.execute(
-                "SELECT * FROM wod_chronicle_progress WHERE game_id = ?",
-                (game_id,),
-            ).fetchone()
+            progress_row = con.execute("SELECT * FROM wod_chronicle_progress WHERE game_id = ?", (game_id,)).fetchone()
             if progress_row is None:
                 raise ValueError("Chronicle progress is missing")
             progress = self._progress_from_row(dict(progress_row))
             rows = con.execute(
-                """
-                SELECT ready_for_convergence FROM wod_player_characters
-                WHERE game_id = ? AND is_active = 1 AND chapter = ? AND segment = ?
-                """,
+                """SELECT ready_for_convergence FROM wod_player_characters
+                WHERE game_id = ? AND is_active = 1 AND chapter = ? AND segment = ?""",
                 (game_id, progress.chapter, progress.segment),
             ).fetchall()
             if not rows or any(not bool(row["ready_for_convergence"]) for row in rows):
@@ -420,41 +361,25 @@ class ChronicleStore:
             final_segment = progress.segment >= progress.segments_per_chapter
             if final_segment:
                 next_progress = ChronicleProgress(
-                    game_id=game_id,
-                    year=progress.year + progress.ellipse_years,
-                    chapter=progress.chapter + 1,
-                    segment=1,
+                    game_id=game_id, year=progress.year + progress.ellipse_years,
+                    chapter=progress.chapter + 1, segment=1,
                     nights_per_segment=progress.nights_per_segment,
-                    segments_per_chapter=progress.segments_per_chapter,
-                    ellipse_years=progress.ellipse_years,
+                    segments_per_chapter=progress.segments_per_chapter, ellipse_years=progress.ellipse_years,
                 )
             else:
                 next_progress = ChronicleProgress(
-                    game_id=game_id,
-                    year=progress.year,
-                    chapter=progress.chapter,
-                    segment=progress.segment + 1,
-                    nights_per_segment=progress.nights_per_segment,
-                    segments_per_chapter=progress.segments_per_chapter,
-                    ellipse_years=progress.ellipse_years,
+                    game_id=game_id, year=progress.year, chapter=progress.chapter,
+                    segment=progress.segment + 1, nights_per_segment=progress.nights_per_segment,
+                    segments_per_chapter=progress.segments_per_chapter, ellipse_years=progress.ellipse_years,
                 )
 
             con.execute(
-                """
-                UPDATE wod_chronicle_progress
-                SET year = ?, chapter = ?, segment = ?, updated_at = CURRENT_TIMESTAMP
-                WHERE game_id = ?
-                """,
-                (
-                    next_progress.year,
-                    next_progress.chapter,
-                    next_progress.segment,
-                    game_id,
-                ),
+                """UPDATE wod_chronicle_progress
+                SET year = ?, chapter = ?, segment = ?, updated_at = CURRENT_TIMESTAMP WHERE game_id = ?""",
+                (next_progress.year, next_progress.chapter, next_progress.segment, game_id),
             )
             con.execute(
-                """
-                UPDATE wod_player_characters
+                """UPDATE wod_player_characters
                 SET chronicle_year = ?, chapter = ?, segment = ?, local_night = 1,
                     ready_for_convergence = 0,
                     experience = experience + CASE
@@ -469,21 +394,10 @@ class ChronicleStore:
                         WHEN ? AND goal_progress >= 7 AND status = 0 THEN 1 ELSE 0 END),
                     goal_progress = CASE WHEN ? THEN 0 ELSE goal_progress END,
                     updated_at = CURRENT_TIMESTAMP
-                WHERE game_id = ? AND is_active = 1
-                """,
-                (
-                    next_progress.year,
-                    next_progress.chapter,
-                    next_progress.segment,
-                    int(final_segment),
-                    int(final_segment),
-                    int(final_segment),
-                    int(final_segment),
-                    int(final_segment),
-                    int(final_segment),
-                    int(final_segment),
-                    game_id,
-                ),
+                WHERE game_id = ? AND is_active = 1""",
+                (next_progress.year, next_progress.chapter, next_progress.segment,
+                 int(final_segment), int(final_segment), int(final_segment), int(final_segment),
+                 int(final_segment), int(final_segment), int(final_segment), game_id),
             )
             con.commit()
         return next_progress

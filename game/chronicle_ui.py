@@ -46,13 +46,6 @@ ROAD_LABELS = {
     "peccati": "Via Peccati",
     "via_mutationis": "Voie de la transformation",
 }
-SKILL_LABELS = {
-    "etiquette": "Étiquette",
-    "insight": "Intuition",
-    "persuasion": "Persuasion",
-    "politics": "Politique",
-    "survival": "Survie",
-}
 CAMARILLA_STAGE_LABELS = {
     "absent": "Aucune Camarilla constituée",
     "project": "Camarilla naissante — coalition annoncée",
@@ -79,11 +72,7 @@ def _render_creation(
     st.subheader("Créer votre vampire")
     player_name = st.text_input("Nom du joueur", value=default_player_name or "Joueur")
     name = st.text_input("Nom du vampire")
-    clan_id = st.selectbox(
-        "Clan",
-        options=SUPPORTED_CLANS,
-        format_func=lambda value: CLAN_LABELS[value],
-    )
+    clan_id = st.selectbox("Clan", options=SUPPORTED_CLANS, format_func=lambda value: CLAN_LABELS[value])
 
     origin_ids = tuple(item.id for item in MORTAL_ORIGINS)
     origin_id = st.selectbox(
@@ -113,8 +102,8 @@ def _render_creation(
     selected_conviction = conviction_rule(conviction_id)
     st.caption(selected_conviction.description)
     st.caption(
-        f"Effet mécanique actuel : +1 en {SKILL_LABELS.get(selected_conviction.favored_skill, selected_conviction.favored_skill)}. "
-        "Les conséquences morales de respecter ou violer cette Conviction seront reliées à l'Humanité lors de la passe dédiée."
+        "Votre Conviction ne donne plus un bonus générique de Compétence. Lorsqu'elle est réellement pertinente "
+        "face à une transgression morale, elle peut atténuer les Flétrissures subies par votre Humanité."
     )
 
     st.info("Voie des personnages joueurs : Via Humanitas.")
@@ -128,17 +117,10 @@ def _render_creation(
         )
         st.caption("Votre Sang n'accepte réellement que des proies correspondant à cette catégorie.")
 
-    sire_key = "|".join(
-        (
-            player_id,
-            name.strip().lower(),
-            clan_id,
-            origin_id,
-            conviction_id,
-            starting_discipline,
-            feeding_preference or "",
-        )
-    )
+    sire_key = "|".join((
+        player_id, name.strip().lower(), clan_id, origin_id, conviction_id,
+        starting_discipline, feeding_preference or "",
+    ))
     selected_sire = choose_sire_from_creation(
         clan_id=clan_id,
         origin_id=origin_id,
@@ -157,11 +139,7 @@ def _render_creation(
             "de la Conviction et de la Discipline choisis."
         )
 
-    submitted = st.button(
-        "Commencer la chronique",
-        type="primary",
-        use_container_width=True,
-    )
+    submitted = st.button("Commencer la chronique", type="primary", use_container_width=True)
     if not submitted:
         return
     if not name.strip():
@@ -182,8 +160,6 @@ def _render_creation(
         clan_id=clan_id,
         concept=concept_from_origin(origin_id, origin_detail),
         starting_discipline=starting_discipline,
-        # Retained internally only for compatibility with V0.21-V0.39 saves.
-        # They are no longer player-facing creation choices.
         mortal_stance="humanist",
         order_stance="orthodox",
         long_term_goal="",
@@ -228,13 +204,15 @@ def _render_header(character, profile, progress, simulation) -> None:
     current_night = progress.nights_per_segment if character.ready_for_convergence else character.local_night
     col4.metric("Nuit", f"{current_night}/{progress.nights_per_segment}")
 
-    vital1, vital2, vital3, vital4, vital5, vital6 = st.columns(6)
+    vital1, vital2, vital3, vital4 = st.columns(4)
     vital1.metric("Faim", f"{character.hunger}/5")
-    vital2.metric("Humanité", f"{character.humanity}/10")
-    vital3.metric("Volonté", profile.willpower)
-    vital4.metric("Statut", character.status)
-    vital5.metric("Influence", f"{character.personal_influence:.1f}")
-    vital6.metric("Expérience", character.experience)
+    vital2.metric("Humanité", f"{character.humanity}/10", help=f"Flétrissures : {profile.humanity_stains}")
+    vital3.metric("Santé", f"{profile.sante_restante}/{profile.sante_maximale}")
+    vital4.metric("Volonté", f"{profile.willpower}/{profile.volonte_maximale}")
+    pos1, pos2, pos3 = st.columns(3)
+    pos1.metric("Statut", character.status)
+    pos2.metric("Influence", f"{character.personal_influence:.1f}")
+    pos3.metric("Expérience", character.experience)
 
 
 def _render_sire(character, profile, era) -> None:
@@ -266,9 +244,7 @@ def _render_journal(store: ChronicleStore, character) -> None:
     for item in history:
         outcome = item.get("outcome_json") or {}
         with st.container(border=True):
-            st.markdown(
-                f"**Chapitre {item['chapter']} · Segment {item['segment']} · Nuit {item['night_number']}**"
-            )
+            st.markdown(f"**Chapitre {item['chapter']} · Segment {item['segment']} · Nuit {item['night_number']}**")
             st.write(outcome.get("summary", item["action"]))
             detail = outcome.get("detail")
             if detail:
@@ -288,8 +264,7 @@ def _render_convergence(repo, character, progress) -> None:
         if result.next_progress.chapter > progress.chapter:
             notice = (
                 f"Le chapitre {progress.chapter} s'achève. Une ellipse de "
-                f"{result.next_progress.year - progress.year} an(s) conduit la chronique en "
-                f"{result.next_progress.year}."
+                f"{result.next_progress.year - progress.year} an(s) conduit la chronique en {result.next_progress.year}."
             )
         else:
             notice = f"Le monde a avancé. Le segment {result.next_progress.segment} commence."
@@ -306,7 +281,9 @@ def _render_profile(character, profile) -> None:
     st.write(f"**Fléau — {identity.bane_name} :** {identity.bane_text}")
     st.write(f"**Génération :** {profile.generation}e")
     st.write(f"**Puissance du Sang :** {profile.blood_potency}")
+    st.write(f"**Santé :** {profile.sante_restante}/{profile.sante_maximale}")
     st.write(f"**Voie :** {ROAD_LABELS.get(profile.road_affinity, profile.road_affinity)}")
+    st.write(f"**Flétrissures :** {profile.humanity_stains}")
     conviction_value = profile.convictions[0] if profile.convictions else ""
     try:
         selected_conviction = conviction_rule(conviction_value)
@@ -314,9 +291,7 @@ def _render_profile(character, profile) -> None:
         st.write(f"**Conviction :** {conviction_value or 'Non renseignée'}")
     else:
         st.write(f"**Conviction :** {selected_conviction.label}")
-        st.caption(
-            f"Effet actuel : +1 en {SKILL_LABELS.get(selected_conviction.favored_skill, selected_conviction.favored_skill)}."
-        )
+        st.caption("Une Conviction pertinente peut atténuer une Flétrissure lors d'une transgression morale.")
     if profile.feeding_preference:
         st.write(f"**Restriction de chasse :** {profile.feeding_preference}")
 
@@ -335,9 +310,7 @@ def _render_domain_and_debts(character, simulation, year: int, characters) -> No
             st.markdown(f"**{domain.name}**")
             st.write(domain.description)
             st.write(f"Détenteur : **{holder_name}**")
-            st.write(
-                f"Viandis **{domain.viandis}/3** · Servage **{domain.servage}/3** · Rempart **{domain.rempart}/3**"
-            )
+            st.write(f"Viandis **{domain.viandis}/3** · Servage **{domain.servage}/3** · Rempart **{domain.rempart}/3**")
             st.caption(f"Accès : {right.source} · Pression {domain.pressure} · Risque {domain.masquerade_risk}/3")
 
     st.subheader("Faveurs et dettes")
@@ -373,10 +346,7 @@ def _render_world(repo, character, simulation, progress, characters) -> None:
     if prince_id:
         prince = political_actor(simulation, characters, prince_id)
         st.write(f"**Prince local :** {prince.name} — {prince.clan_id.title()}")
-    st.write(
-        f"**Caïnites persistants :** {len(simulation.npcs) + 1} "
-        "vampires suivis par cette chronique"
-    )
+    st.write(f"**Caïnites persistants :** {len(simulation.npcs) + 1} vampires suivis par cette chronique")
 
     eligibilities = office_eligibility(character, simulation, era)
     with st.expander("Votre accès aux fonctions politiques"):
@@ -397,35 +367,22 @@ def _render_world(repo, character, simulation, progress, characters) -> None:
         st.caption("Le monde n'a pas encore connu de convergence depuis votre Étreinte.")
 
 
-def _render_night(
-    store,
-    profile_store,
-    simulation_store,
-    character,
-    profile,
-    simulation,
-    progress,
-) -> None:
+def _render_night(store, profile_store, simulation_store, character, profile, simulation, progress) -> None:
     st.subheader(f"Nuit {character.local_night}")
     st.caption(
         "Les propositions ci-dessous sont des situations, pas une liste d'actions abstraites : "
         "choisissez celle que votre vampire décide réellement d'affronter."
     )
-
     situations = generate_situations(character, profile, simulation, year=progress.year)
     for situation in situations:
         with st.container(border=True):
             st.markdown(f"### {situation.title}")
             st.write(situation.body)
-            with st.form(
-                f"situation_{character.chapter}_{character.segment}_{character.local_night}_{situation.id}"
-            ):
+            with st.form(f"situation_{character.chapter}_{character.segment}_{character.local_night}_{situation.id}"):
                 choice_id = st.radio(
                     "Votre décision",
                     options=[choice.id for choice in situation.choices],
-                    format_func=lambda value: next(
-                        choice.label for choice in situation.choices if choice.id == value
-                    ),
+                    format_func=lambda value: next(choice.label for choice in situation.choices if choice.id == value),
                 )
                 selected = next(choice for choice in situation.choices if choice.id == choice_id)
                 st.caption(selected.description)
@@ -435,26 +392,13 @@ def _render_night(
                     max_chars=500,
                     key=f"intent_{situation.id}",
                 )
-                play = st.form_submit_button(
-                    "Jouer cette situation",
-                    type="primary",
-                    use_container_width=True,
-                )
+                play = st.form_submit_button("Jouer cette situation", type="primary", use_container_width=True)
             if play:
                 resolution = resolve_situation(
-                    character,
-                    profile,
-                    simulation,
-                    situation,
-                    choice_id,
-                    nights_per_segment=progress.nights_per_segment,
-                    free_intent=free_intent,
+                    character, profile, simulation, situation, choice_id,
+                    nights_per_segment=progress.nights_per_segment, free_intent=free_intent,
                 )
-                store.advance_personal_night(
-                    character,
-                    resolution.outcome,
-                    free_intent=free_intent,
-                )
+                store.advance_personal_night(character, resolution.outcome, free_intent=free_intent)
                 simulation_store.save(resolution.simulation)
                 profile_store.save(resolution.profile)
                 dice = resolution.dice
@@ -465,13 +409,7 @@ def _render_night(
                 st.rerun()
 
 
-def render_chronicle_app(
-    repo,
-    *,
-    player_id: str,
-    player_name: str = "Joueur",
-    backend_label: str = "",
-) -> None:
+def render_chronicle_app(repo, *, player_id: str, player_name: str = "Joueur", backend_label: str = "") -> None:
     try:
         context = ensure_personal_chronicle(repo, player_id=player_id)
     except ValueError as exc:
@@ -489,14 +427,7 @@ def render_chronicle_app(
 
     character = store.get_character(game_id, player_id)
     if character is None:
-        _render_creation(
-            store,
-            profile_store,
-            simulation_store,
-            game_id,
-            player_id,
-            player_name,
-        )
+        _render_creation(store, profile_store, simulation_store, game_id, player_id, player_name)
         return
 
     profile = profile_store.ensure_for_character(character)
@@ -536,21 +467,11 @@ def render_chronicle_app(
     night_tab, relations_tab, domain_tab, journal_tab, world_tab = st.tabs(
         ["Cette nuit", "Mes liens", "Domaine & dettes", "Journal", "Le monde"]
     )
-
     with night_tab:
         if character.ready_for_convergence:
             _render_convergence(repo, character, progress)
         else:
-            _render_night(
-                store,
-                profile_store,
-                simulation_store,
-                character,
-                profile,
-                simulation,
-                progress,
-            )
-
+            _render_night(store, profile_store, simulation_store, character, profile, simulation, progress)
     with relations_tab:
         _render_sire(character, profile, era_for_year(progress.year))
         render_relationship_memories(store, character, simulation)
@@ -558,12 +479,9 @@ def render_chronicle_app(
         st.markdown("### Votre position")
         st.write(f"**Réputation :** {character.reputation:+d}")
         st.write(f"**Expérience accumulée :** {character.experience}")
-
     with domain_tab:
         _render_domain_and_debts(character, simulation, progress.year, characters)
-
     with journal_tab:
         _render_journal(store, character)
-
     with world_tab:
         _render_world(repo, character, simulation, progress, characters)

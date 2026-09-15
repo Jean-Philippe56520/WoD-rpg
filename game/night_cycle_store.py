@@ -6,7 +6,10 @@ from typing import Any
 
 from .chronicle import NightOutcome, PersonalAction, PlayerCharacter
 from .chronicle_store import ChronicleStore
+from .humanity import appliquer_fletrissures, resoudre_remords
+from .morality_stakes import conviction_protege, enjeu_pour_entree_log
 from .night_cycle import MAX_FREE_ACTIONS, NightPhase, NightStepResult, NightTurnState, log_entry
+from .vampire_profile_store import VampireProfileStore
 
 
 class NightCycleStore:
@@ -82,18 +85,11 @@ class NightCycleStore:
 
         current = self.get_state(character.game_id, character.player_id)
         if current is not None and self._matches(current, character):
-            if (
-                current.phase == NightPhase.EVENT
-                and not current.log
-                and current.event_id != event_id
-            ):
+            if current.phase == NightPhase.EVENT and not current.log and current.event_id != event_id:
                 with self.repository._connect() as con:
                     con.execute(
-                        """
-                        UPDATE wod_character_night_state
-                        SET event_id=?, updated_at=CURRENT_TIMESTAMP
-                        WHERE game_id=? AND player_id=? AND phase='event' AND log_json='[]'
-                        """,
+                        """UPDATE wod_character_night_state SET event_id=?, updated_at=CURRENT_TIMESTAMP
+                        WHERE game_id=? AND player_id=? AND phase='event' AND log_json='[]'""",
                         (event_id, character.game_id, character.player_id),
                     )
                 refreshed = self.get_state(character.game_id, character.player_id)
@@ -187,12 +183,61 @@ class NightCycleStore:
     def finish_night(self, character: PlayerCharacter, state: NightTurnState, *, nights_per_segment: int) -> PlayerCharacter:
         if not self._matches(state, character) or state.phase == NightPhase.EVENT:
             raise ValueError("Opening event must be resolved before ending the night")
+
         ready = character.local_night >= nights_per_segment
         updated = replace(
             character,
             local_night=character.local_night if ready else character.local_night + 1,
             ready_for_convergence=ready,
         )
+        profile_store = VampireProfileStore(self.repository)
+        profile = profile_store.ensure_for_character(character)
+        moral_notes: list[str] = []
+
+        for item in state.log:
+            enjeu = enjeu_pour_entree_log(item)
+            if enjeu is None or enjeu.stains <= 0:
+                continue
+            result = appliquer_fletrissures(
+                updated,
+                profile,
+                enjeu.stains,
+                conviction_protege=conviction_protege(enjeu, profile.convictions),
+            )
+            profile = result.profile
+            if result.ajoutees:
+                moral_notes.append(
+                    f"Cette décision marque votre Humanité de {result.ajoutees} Flétrissure(s)."
+                )
+            if result.mitigees:
+                moral_notes.append("Votre Conviction atténue d'une Flétrissure le poids moral de cet acte.")
+            if result.debordement:
+                moral_notes.append(
+                    f"{result.debordement} Flétrissure(s) dépassent la piste disponible ; cette surcharge morale reste signalée."
+                )
+
+        if ready and profile.humanity_stains > 0:
+            remorse = resoudre_remords(
+                updated,
+                profile,
+                seed=(
+                    f"{character.character_id}:{character.chapter}:{character.segment}:"
+                    f"{character.local_night}:remords"
+                ),
+            )
+            updated = remorse.personnage
+            profile = remorse.profile
+            if remorse.succes:
+                moral_notes.append(
+                    f"Remords : {remorse.pool} dé(s), au moins un succès. Vous affrontez vos actes sans perdre d'Humanité."
+                )
+            else:
+                moral_notes.append(
+                    f"Remords : {remorse.pool} dé(s), aucun succès. Votre Humanité baisse à {updated.humanity}."
+                )
+            if remorse.wassail:
+                moral_notes.append("Votre Humanité tombe à 0 : le vampire est au seuil du Wassail.")
+
         last_action = PersonalAction.PURSUE_GOAL
         if state.log:
             try:
@@ -218,12 +263,15 @@ class NightCycleStore:
             if choice:
                 header += f" · Décision : {choice}"
             details.append(f"{header}. {' '.join(parts)}".strip())
+        details.extend(moral_notes)
         outcome = NightOutcome(
             action=last_action,
             roll=sum(int(item.get("successes", 0)) for item in state.log),
             summary=f"Nuit achevée : événement résolu, {action_count} action(s) libre(s) entreprise(s).",
             detail=" ".join(details) or "La nuit s'achève sans autre fait notable.",
             updated_character=updated,
-            tags=("night_cycle", "event_then_free_actions"),
+            tags=("night_cycle", "event_then_free_actions") + (("remords",) if any("Remords" in note for note in moral_notes) else ()),
         )
-        return ChronicleStore(self.repository).advance_personal_night(character, outcome)
+        persisted = ChronicleStore(self.repository).advance_personal_night(character, outcome)
+        profile_store.save(profile)
+        return persisted
