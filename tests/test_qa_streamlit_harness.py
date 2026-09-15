@@ -83,7 +83,7 @@ def test_qa_harness_opens_on_isolated_first_night(monkeypatch, tmp_path):
     assert any("Agnès de Chartres" in value for value in _text_values(app.title))
     assert any("aucune écriture Supabase" in value for value in _text_values(app.error))
     assert any("Événement de la nuit" in value for value in _text_values(app.markdown))
-    rendered = _text_values(app.markdown) + _text_values(app.caption)
+    rendered = _text_values(app.markdown) + _text_values(app.caption) + _text_values(app.subheader)
     assert any("Nuit significative" in value for value in rendered)
 
     snapshot = qa_snapshot(_repo(tmp_path, "first_night"), "first_night")
