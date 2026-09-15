@@ -462,12 +462,18 @@ class PoliticalRequestDecisionOrder:
 
 
 @dataclass(frozen=True)
+class PoliticalPromiseFulfillmentOrder:
+    promise_id: str
+
+
+@dataclass(frozen=True)
 class ClanNightOrders:
     clan_id: str
     actions: tuple[GameAction, ...]
     vote: PrimogenVote | None = None
     embrace_petitions: tuple[EmbracePetitionOrder, ...] = ()
     request_decisions: tuple[PoliticalRequestDecisionOrder, ...] = ()
+    promise_fulfillments: tuple[PoliticalPromiseFulfillmentOrder, ...] = ()
     version: int = 1
 
 
