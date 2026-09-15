@@ -81,6 +81,16 @@ class GameRules:
     diplomatic_pact_breach_relation_loss: float = 2.0
     diplomatic_pact_breach_stability_loss: float = 1.0
 
+    # V0.18 : une Praxis reconnue peut perdre sa reconnaissance. Il faut au
+    # minimum plusieurs Primogènes et une majorité du poids politique réel.
+    praxis_challenge_threshold: float = 0.50
+    praxis_challenge_min_primogens: int = 2
+    praxis_challenge_success_stability_loss: float = 4.0
+    praxis_challenge_success_masquerade_loss: float = 1.0
+    praxis_challenge_failure_stability_loss: float = 1.0
+    praxis_challenge_failure_prince_relation_loss: float = 3.0
+    deposed_prince_status_loss: int = 1
+
     approve_relation_support: float = 3.0
     approve_relation_neutral: float = 0.0
     approve_relation_oppose: float = -8.0
