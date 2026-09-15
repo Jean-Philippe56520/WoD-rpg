@@ -4,7 +4,6 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import Iterable, Mapping
 
-from .actions import apply_action
 from .autonomy import resolve_autonomous_reactions
 from .config import DEFAULT_RULES, GameRules
 from .domains import (
@@ -30,6 +29,7 @@ from .models import (
 )
 from .offices import install_prince
 from .politics import VoteResolution, resolve_praxis_vote
+from .simultaneous import resolve_actions_simultaneously
 from .social_politics import (
     add_grievance,
     create_boon,
@@ -121,7 +121,7 @@ def _apply_domain_decision(
                 origin=f"Droit de chasse accordé sur {domain.name}",
             )
             boon_id = boon.id
-        right = grant_hunting_right(
+        grant_hunting_right(
             state,
             domain_id=domain.id,
             beneficiary_id=beneficiary.id,
@@ -216,8 +216,9 @@ def resolve_night(
     for clan_id, order in domain_decisions:
         next_state.events.append(_apply_domain_decision(next_state, clan_id, order))
 
-    for action in actions:
-        next_state.events.append(apply_action(next_state, action, rules))
+    # Toutes les missions voient le même état de début de phase. Leurs effets sont
+    # ensuite fusionnés, ce qui retire tout avantage à l'ordre de parcours.
+    next_state.events.extend(resolve_actions_simultaneously(next_state, actions, rules))
 
     initialize_factions(next_state)
     vote_result: VoteResolution | None = None
