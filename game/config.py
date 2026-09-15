@@ -6,6 +6,7 @@ class GameRules:
     opposition_transfer_ratio: float = 0.50
     praxis_recognition_threshold: float = 0.50
     embrace_petitions_per_clan: int = 1
+    domain_decisions_per_clan: int = 1
 
     # Compatibilité des ordres V0.7 déjà persistés.
     actions_per_clan: int = 2
