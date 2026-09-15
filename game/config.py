@@ -4,21 +4,30 @@ from dataclasses import dataclass
 @dataclass(frozen=True)
 class GameRules:
     opposition_transfer_ratio: float = 0.50
+    praxis_recognition_threshold: float = 0.50
+    embrace_petitions_per_clan: int = 1
+
+    # Compatibilité des ordres V0.7 déjà persistés.
+    actions_per_clan: int = 2
     current_support_threshold: float = 50.0
     current_default_loyalty: float = 50.0
     ideology_support_scale: float = 0.10
-    praxis_recognition_threshold: float = 0.50
-    actions_per_clan: int = 2
-    embrace_petitions_per_clan: int = 1
-
     consolidate_influence_gain: float = 3.0
     consolidate_rival_loyalty_penalty: float = 4.0
     rally_current_loyalty_gain: float = 12.0
     influence_gain_primogen: float = 2.0
     influence_gain_peer: float = 1.0
-    diplomacy_gain: float = 8.0
-    ideology_diplomacy_scale: float = 0.05
+
+    # V0.8 : une action maximum par vampire et par nuit.
+    influence_action_min_gain: float = 1.0
+    diplomacy_gain: float = 1.0
     diplomacy_minimum_gain: float = 1.0
+    relation_action_threshold: int = 3
+    recruit_base_difficulty: int = 4
+    undermine_base_difficulty: int = 4
+    poach_base_difficulty: int = 4
+    investigation_base_difficulty: int = 2
+    max_intel_level: int = 2
 
     disputed_stability_loss: float = 4.0
     disputed_masquerade_loss: float = 1.0
