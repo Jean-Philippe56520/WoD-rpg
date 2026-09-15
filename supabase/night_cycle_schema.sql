@@ -93,6 +93,14 @@ begin
         updated_at = now()
     where game_id = p_game_id and player_id = p_player_id
     returning * into v_state;
+  elsif v_state.phase = 'event'
+        and jsonb_array_length(v_state.log_json) = 0
+        and v_state.event_id <> trim(p_event_id) then
+    update public.wod_character_night_state
+    set event_id = trim(p_event_id),
+        updated_at = now()
+    where game_id = p_game_id and player_id = p_player_id
+    returning * into v_state;
   end if;
 
   return to_jsonb(v_state);
