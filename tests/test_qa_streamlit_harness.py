@@ -33,13 +33,17 @@ def _button_by_label(app, label: str):
     return next(button for button in app.button if button.label == label)
 
 
+def _text_values(elements):
+    return [str(item.value) for item in elements]
+
+
 def test_qa_harness_opens_on_isolated_first_night(monkeypatch, tmp_path):
     app = _app(monkeypatch, tmp_path)
 
     assert app.selectbox(key="qa_scenario_selector").value == "first_night"
-    assert any("laboratoire QA" in item.value for item in app.title)
-    assert any("Agnès de Chartres" in item.value for item in app.title)
-    assert any("aucune écriture Supabase" in item.value for item in app.sidebar.error)
+    assert any("laboratoire QA" in value for value in _text_values(app.title))
+    assert any("Agnès de Chartres" in value for value in _text_values(app.title))
+    assert any("aucune écriture Supabase" in value for value in _text_values(app.error))
 
     snapshot = qa_snapshot(_repo(tmp_path, "first_night"), "first_night")
     assert snapshot["world"]["prince_id"] == "npc_alexandre"
@@ -64,7 +68,7 @@ def test_high_hunger_scenario_prioritizes_hunt(monkeypatch, tmp_path):
 
     assert snapshot["character"]["hunger"] == 4
     assert snapshot["situations"][0]["id"].startswith("hunt_")
-    assert any("La Faim réclame une décision" in item.value for item in app.markdown)
+    assert any("La Faim réclame une décision" in value for value in _text_values(app.markdown))
 
 
 def test_release_candidate_exposes_emancipation_situation(monkeypatch, tmp_path):
@@ -96,16 +100,16 @@ def test_trusted_and_hostile_sire_change_rendered_difficulty_context(monkeypatch
     _button_by_label(trusted, "Jouer cette situation").click().run()
     assert not trusted.exception
     assert any(
-        "confiance acquise" in item.value.lower()
-        for item in trusted.success
+        "confiance acquise" in value.lower()
+        for value in _text_values(trusted.success)
     )
 
     hostile = _select_scenario(_app(monkeypatch, tmp_path), "hostile_sire")
     _button_by_label(hostile, "Jouer cette situation").click().run()
     assert not hostile.exception
     assert any(
-        "passif avec cet interlocuteur" in item.value.lower()
-        for item in hostile.success
+        "passif avec cet interlocuteur" in value.lower()
+        for value in _text_values(hostile.success)
     )
 
 
@@ -114,7 +118,8 @@ def test_prestation_fixture_is_visible_in_relationship_state(monkeypatch, tmp_pa
     snapshot = qa_snapshot(_repo(tmp_path, "prestation_due"), "prestation_due")
 
     assert snapshot["world"]["boon_count"] >= 1
-    assert any("Prestation" in item.value for item in app.markdown + app.caption)
+    rendered_text = _text_values(app.markdown) + _text_values(app.caption)
+    assert any("Prestation" in value for value in rendered_text)
 
 
 def test_convergence_button_advances_world_and_resets_local_night(monkeypatch, tmp_path):
