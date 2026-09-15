@@ -35,6 +35,23 @@ class PersonalAction(str, Enum):
     PURSUE_GOAL = "pursue_goal"
 
 
+class PoliticalOffice(str, Enum):
+    NONE = "none"
+    DOMAIN_HOLDER = "domain_holder"
+    CLAN_ENVOY = "clan_envoy"
+    PRIMOGEN = "primogen"
+    PRINCE = "prince"
+
+
+OFFICE_LABELS = {
+    PoliticalOffice.NONE.value: "Aucune fonction",
+    PoliticalOffice.DOMAIN_HOLDER.value: "Détenteur de Domaine",
+    PoliticalOffice.CLAN_ENVOY.value: "Représentant du clan",
+    PoliticalOffice.PRIMOGEN.value: "Primogène",
+    PoliticalOffice.PRINCE.value: "Prince",
+}
+
+
 ACTION_LABELS = {
     PersonalAction.HUNT: "Chasser",
     PersonalAction.VISIT_SIRE: "Répondre à mon sire",
@@ -185,6 +202,9 @@ class PlayerCharacter:
     starting_discipline: str
     mortal_stance: str
     order_stance: str
+    experience: int = 0
+    office: str = PoliticalOffice.NONE.value
+    lineage_parent_id: str | None = None
     ready_for_convergence: bool = False
     is_active: bool = True
 
@@ -207,6 +227,9 @@ class PlayerCharacter:
             raise ValueError("Local night must be positive")
         if self.chapter < 1 or self.segment < 1:
             raise ValueError("Chapter and segment must be positive")
+        if self.experience < 0:
+            raise ValueError("Experience cannot be negative")
+        PoliticalOffice(self.office)
 
 
 @dataclass(frozen=True)
@@ -260,12 +283,23 @@ def create_player_character(
     long_term_goal: str,
     chapter_goal: str,
     progress: ChronicleProgress,
+    sire_id: str | None = None,
+    sire_name: str | None = None,
+    lineage_parent_id: str | None = None,
 ) -> PlayerCharacter:
     if clan_id not in SUPPORTED_CLANS:
         raise ValueError(f"Unsupported clan: {clan_id}")
     if starting_discipline not in CLAN_DISCIPLINES[clan_id]:
         raise ValueError("Starting discipline must belong to the selected clan")
-    sire = choose_sire(clan_id, order_stance, mortal_stance)
+    if sire_id is None:
+        sire = choose_sire(clan_id, order_stance, mortal_stance)
+        resolved_sire_id = sire.id
+        resolved_sire_name = sire.name
+    else:
+        if not sire_name:
+            raise ValueError("A named sire is required when using a custom sire id")
+        resolved_sire_id = sire_id
+        resolved_sire_name = sire_name
     return PlayerCharacter(
         game_id=game_id,
         player_id=player_id,
@@ -274,8 +308,8 @@ def create_player_character(
         name=name.strip(),
         clan_id=clan_id,
         concept=concept.strip() or "Nouveau-né en quête de place",
-        sire_id=sire.id,
-        sire_name=sire.name,
+        sire_id=resolved_sire_id,
+        sire_name=resolved_sire_name,
         embraced_year=progress.year - 2,
         chronicle_year=progress.year,
         chapter=progress.chapter,
@@ -293,6 +327,9 @@ def create_player_character(
         starting_discipline=starting_discipline,
         mortal_stance=mortal_stance,
         order_stance=order_stance,
+        experience=0,
+        office=PoliticalOffice.NONE.value,
+        lineage_parent_id=lineage_parent_id,
     )
 
 
@@ -452,9 +489,8 @@ def resolve_personal_night(
 
 
 def nightly_hook(character: PlayerCharacter) -> str:
-    sire = sire_for_id(character.sire_id)
     options = (
-        f"{sire.name} a fait demander si vous étiez disponible avant l'aube.",
+        f"{character.sire_name} a fait demander si vous étiez disponible avant l'aube.",
         "Un messager affirme qu'un Caïnite récemment arrivé cherche des soutiens discrets.",
         "Une rumeur évoque des disparitions que les mortels attribuent à des loups.",
         "Un serviteur de la Cour collecte des noms avant une réunion dont le motif reste flou.",
