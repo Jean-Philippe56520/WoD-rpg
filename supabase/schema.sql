@@ -39,7 +39,7 @@ create table if not exists public.wod_nights (
 
 create table if not exists public.wod_night_submissions (
   game_id text not null,
-  night_number integer not null check (night_number >= 1),
+  night_number integer not null,
   clan_id text not null check (clan_id in ('ventrue','toreador','brujah')),
   player_id text not null,
   orders_json jsonb not null,
@@ -51,7 +51,7 @@ create table if not exists public.wod_night_submissions (
 
 create table if not exists public.wod_night_reports (
   game_id text not null,
-  night_number integer not null check (night_number >= 1),
+  night_number integer not null,
   clan_id text not null check (clan_id in ('ventrue','toreador','brujah')),
   report_json jsonb not null,
   created_at timestamptz not null default now(),
@@ -349,92 +349,3 @@ grant execute on function public.wod_withdraw_orders(text,text,text) to service_
 grant execute on function public.wod_try_begin_resolution(text) to service_role;
 grant execute on function public.wod_abort_resolution(text,integer) to service_role;
 grant execute on function public.wod_finalize_resolution(text,integer,integer,jsonb,jsonb) to service_role;
-
--- V0.30-V0.39 - fiche Vampire extensible et etat politique de chronique.
--- Ces tables restent serveur-only. Les donnees de jeu ne sont jamais exposees
--- directement aux roles anon/authenticated ; Streamlit passe par le backend.
-
-create table if not exists public.wod_character_profiles (
-  game_id text not null,
-  character_id text not null,
-  profile_json jsonb not null,
-  updated_at timestamptz not null default now(),
-  primary key (game_id, character_id),
-  foreign key (game_id, character_id)
-    references public.wod_player_characters(game_id, character_id)
-    on delete cascade
-);
-
-create table if not exists public.wod_chronicle_simulations (
-  game_id text primary key references public.wod_games(id) on delete cascade,
-  state_json jsonb not null,
-  updated_at timestamptz not null default now()
-);
-
-alter table public.wod_character_profiles enable row level security;
-alter table public.wod_chronicle_simulations enable row level security;
-
-revoke all on table public.wod_character_profiles from public, anon, authenticated;
-revoke all on table public.wod_chronicle_simulations from public, anon, authenticated;
-
-grant select, insert, update, delete on table public.wod_character_profiles to service_role;
-grant select, insert, update, delete on table public.wod_chronicle_simulations to service_role;
-
-create or replace function public.wod_upsert_character_profile(
-  p_game_id text,
-  p_character_id text,
-  p_profile jsonb
-)
-returns jsonb
-language plpgsql
-security invoker
-set search_path = ''
-as $$
-declare
-  v_profile jsonb;
-begin
-  if p_profile is null or jsonb_typeof(p_profile) <> 'object' then
-    raise exception 'Character profile must be a JSON object';
-  end if;
-
-  insert into public.wod_character_profiles(game_id, character_id, profile_json, updated_at)
-  values(p_game_id, p_character_id, p_profile, now())
-  on conflict(game_id, character_id)
-  do update set profile_json = excluded.profile_json, updated_at = excluded.updated_at
-  returning profile_json into v_profile;
-
-  return v_profile;
-end;
-$$;
-
-create or replace function public.wod_upsert_chronicle_simulation(
-  p_game_id text,
-  p_state jsonb
-)
-returns jsonb
-language plpgsql
-security invoker
-set search_path = ''
-as $$
-declare
-  v_state jsonb;
-begin
-  if p_state is null or jsonb_typeof(p_state) <> 'object' then
-    raise exception 'Chronicle simulation must be a JSON object';
-  end if;
-
-  insert into public.wod_chronicle_simulations(game_id, state_json, updated_at)
-  values(p_game_id, p_state, now())
-  on conflict(game_id)
-  do update set state_json = excluded.state_json, updated_at = excluded.updated_at
-  returning state_json into v_state;
-
-  return v_state;
-end;
-$$;
-
-revoke all on function public.wod_upsert_character_profile(text,text,jsonb) from public,anon,authenticated;
-revoke all on function public.wod_upsert_chronicle_simulation(text,jsonb) from public,anon,authenticated;
-
-grant execute on function public.wod_upsert_character_profile(text,text,jsonb) to service_role;
-grant execute on function public.wod_upsert_chronicle_simulation(text,jsonb) to service_role;
