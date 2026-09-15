@@ -5,11 +5,40 @@ from enum import Enum
 from typing import Optional
 
 
+class AxisPolarity(str, Enum):
+    PLUS = "+"
+    MINUS = "-"
+
+
 class IdeologyQuadrant(str, Enum):
     HUMANIST_TRADITIONAL = "humanist_traditional"
     HUMANIST_REFORMIST = "humanist_reformist"
     PREDATORY_TRADITIONAL = "predatory_traditional"
     PREDATORY_RADICAL = "predatory_radical"
+
+
+class BloodRank(str, Enum):
+    NEWBORN = "newborn"
+    ANCILLA = "ancilla"
+    ELDER = "elder"
+
+
+class CharacterAttribute(str, Enum):
+    PHYSICAL = "physical"
+    SOCIAL = "social"
+    MENTAL = "mental"
+
+
+CLAN_DISCIPLINES: dict[str, tuple[str, ...]] = {
+    "brujah": ("celerite", "puissance", "presence"),
+    "toreador": ("auspex", "celerite", "presence"),
+    "ventrue": ("domination", "force_d_ame", "presence"),
+}
+
+
+def _validate_zero_to_two(label: str, value: int) -> None:
+    if not isinstance(value, int) or isinstance(value, bool) or not 0 <= value <= 2:
+        raise ValueError(f"{label} must be an integer between 0 and 2")
 
 
 @dataclass
@@ -18,22 +47,62 @@ class Character:
     name: str
     clan_id: Optional[str] = None
     personal_influence: float = 0.0
-    humanity: int = 7
-    humanism: float = 0.0
-    tradition: float = 0.0
+    humanity_axis: AxisPolarity = AxisPolarity.PLUS
+    tradition_axis: AxisPolarity = AxisPolarity.PLUS
+    physical: int = 1
+    social: int = 1
+    mental: int = 1
+    expertises: tuple[str, ...] = ()
+    disciplines: dict[str, int] = field(default_factory=dict)
+    blood_rank: BloodRank = BloodRank.NEWBORN
+    backgrounds: dict[str, int] = field(default_factory=dict)
     loyalty: float = 50.0
     ambition: float = 50.0
     is_primogen: bool = False
 
     def __post_init__(self) -> None:
-        if not 0 <= self.humanity <= 10:
-            raise ValueError("Humanity must be between 0 and 10")
-        if not -100 <= self.humanism <= 100:
-            raise ValueError("Humanism must be between -100 and 100")
-        if not -100 <= self.tradition <= 100:
-            raise ValueError("Tradition must be between -100 and 100")
+        self.humanity_axis = AxisPolarity(self.humanity_axis)
+        self.tradition_axis = AxisPolarity(self.tradition_axis)
+        self.blood_rank = BloodRank(self.blood_rank)
+
+        for label, value in (
+            ("Physical", self.physical),
+            ("Social", self.social),
+            ("Mental", self.mental),
+        ):
+            _validate_zero_to_two(label, value)
+
         if self.personal_influence < 0:
             raise ValueError("Personal influence cannot be negative")
+        if not 0 <= self.loyalty <= 100:
+            raise ValueError("Loyalty must be between 0 and 100")
+        if not 0 <= self.ambition <= 100:
+            raise ValueError("Ambition must be between 0 and 100")
+
+        cleaned_expertises = tuple(expertise.strip() for expertise in self.expertises)
+        if any(not expertise for expertise in cleaned_expertises):
+            raise ValueError("Expertises cannot contain empty values")
+        if len({expertise.casefold() for expertise in cleaned_expertises}) != len(cleaned_expertises):
+            raise ValueError("Expertises must be unique")
+        self.expertises = cleaned_expertises
+
+        for discipline, score in self.disciplines.items():
+            if not discipline.strip():
+                raise ValueError("Discipline names cannot be empty")
+            _validate_zero_to_two(f"Discipline {discipline}", score)
+
+        clan_disciplines = CLAN_DISCIPLINES.get(self.clan_id or "")
+        if clan_disciplines is not None:
+            invalid = set(self.disciplines) - set(clan_disciplines)
+            if invalid:
+                raise ValueError(
+                    f"Invalid clan disciplines for {self.clan_id}: {', '.join(sorted(invalid))}"
+                )
+
+        for background, score in self.backgrounds.items():
+            if not background.strip():
+                raise ValueError("Background names cannot be empty")
+            _validate_zero_to_two(f"Background {background}", score)
 
 
 @dataclass(frozen=True)
@@ -45,8 +114,8 @@ class PoliticalCurrent:
     influence: float
     leader_id: Optional[str]
     member_ids: tuple[str, ...]
-    centroid_humanism: float
-    centroid_tradition: float
+    humanity_axis: AxisPolarity
+    tradition_axis: AxisPolarity
 
 
 @dataclass
