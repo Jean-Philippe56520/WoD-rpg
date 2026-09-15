@@ -4,80 +4,131 @@ Jeu politique vampirique persistant et principalement asynchrone, développé en
 
 Application stable : https://wod-rpg.streamlit.app
 
-## V0.7
+## V0.8
 
-Le MVP reste limité à **Brujah, Toreador et Ventrue**.
+Le MVP reste limité à **Brujah, Toreador et Ventrue**. Chaque joueur contrôle un clan mais incarne directement son **Primogène** ; les autres vampires du clan restent des acteurs politiques distincts.
 
-### Fiche de personnage simplifiée
+### Fiche de vampire
 
-Chaque vampire possède désormais une fiche compacte pensée pour un grand nombre de PNJ :
+Chaque personnage possède :
 
-- deux axes politiques binaires : **Humanité +/-** et **Traditions +/-** ;
-- trois caractéristiques de **0 à 2** : Physique, Social, Mental ;
-- une ou plusieurs **Expertises**, chacune donnant +1 lorsqu'elle est pertinente ;
-- les trois Disciplines accessibles à son clan, chacune de **0 à 2** ;
+- **Humanité +/-** et **Traditions +/-** comme convictions idéologiques ;
+- Physique, Social et Mental de **0 à 2** ;
+- des **Expertises** donnant +1 lorsqu'elles sont pertinentes ;
+- des **Disciplines** nommées de 0 à 2 ;
 - un **Rang de Sang** : Nouveau-né, Ancilla ou Ancien ;
-- des **Historiques** nommés de **0 à 2** ;
-- les données politiques vivantes déjà existantes : influence, loyauté, ambition et fonctions.
+- des **Historiques** nommés de 0 à 2 ;
+- une influence personnelle, une ambition et des relations politiques.
 
-La résolution générique d'une action de personnage est volontairement simple :
+La base de résolution reste compacte :
 
 ```text
-Caractéristique + Expertise éventuelle (+1) + Discipline OU Historique
+Caractéristique + Expertise éventuelle (+1) + meilleure Discipline OU meilleur Historique pertinent
 ```
 
-Discipline et Historique ne se cumulent pas sur une même résolution. Le Rang de Sang n'est pas un bonus universel : il sera utilisé seulement lorsque la nature surnaturelle de l'action le justifie.
+Le Rang de Sang n'est pas un bonus universel.
 
-### Courants politiques
+## Deux coteries politiques par clan
 
-Les quatre courants sont maintenant directement dérivés des deux axes :
+Les quatre combinaisons idéologiques existent toujours, mais **ne sont plus quatre factions politiques**. Chaque clan possède seulement :
 
-| Humanité | Traditions | Courant |
-| --- | --- | --- |
-| + | + | Humanistes traditionalistes |
-| + | - | Humanistes réformateurs |
-| - | + | Prédateurs traditionalistes |
-| - | - | Prédateurs radicaux |
+1. la **coterie du Primogène** ;
+2. la **coterie d'opposition**.
 
-L'affinité est volontairement discrète : même courant = forte affinité, un axe commun = affinité partielle, deux axes opposés = malus. La règle de dissidence reste configurable : lorsqu'un courant refuse son Primogène, une part de son influence reste avec lui et l'autre renforce le vote d'un Primogène allié.
+Le Primogène dirige obligatoirement sa coterie. L'opposition possède un chef distinct dont la combinaison Humanité/Traditions ne peut pas être exactement identique à celle du Primogène. Un membre peut donc être idéologiquement proche du Primogène tout en appartenant politiquement à l'opposition.
 
-### Identité et lobby
+L'influence d'une coterie est la somme de l'influence personnelle de ses membres.
 
-- l'application utilise **Supabase Auth** avec email + mot de passe ;
-- l'identité persistante d'un joueur est l'UUID de son compte Supabase Auth ;
-- l'identifiant joueur n'est pas transmis dans l'URL ;
-- un compte ne peut contrôler qu'un seul clan dans la chronique ;
-- un clan ne peut être contrôlé que par un seul compte ;
-- après reconnexion avec le même compte, le joueur retrouve automatiquement son clan ;
-- le lobby n'affiche que les clans disponibles/occupés et le nom public de leur contrôleur.
+### Relation au Primogène
 
-### Partie multijoueur asynchrone
+Chaque membre possède une relation personnelle au Primogène de **0 à 2**. Le moteur calcule ensuite une relation effective :
 
-- un joueur contrôle un seul clan et incarne son **Primogène actuel** ;
-- sa session expose son clan en détail, plus les informations publiques de la ville ;
-- les membres, courants, loyautés et ordres internes des autres clans restent privés ;
-- chaque joueur prépare puis valide ses ordres de nuit ;
-- les ordres validés sont persistés dans Supabase et restent consultables par leur auteur ;
-- tant que la nuit est encore `OPEN`, un joueur peut **annuler sa validation** et reprendre ses ordres ;
-- dès que les trois clans ont validé, la nuit passe par `READY -> RESOLVING -> RESOLVED` et ne peut plus être modifiée ;
-- la résolution globale est unique et atomique ;
-- chaque clan reçoit son propre rapport selon les informations qu'il peut connaître ;
+| Compatibilité idéologique | Modificateur |
+| --- | ---: |
+| deux axes identiques | +1 |
+| un axe identique | 0 |
+| deux axes opposés | -1 |
+
+```text
+Relation effective = relation personnelle + modificateur idéologique
+```
+
+Le résultat peut donc aller de **-1 à 3**. La coterie n'est pas automatiquement déduite de cette relation : un opposant peut respecter le Primogène et un membre de sa coterie peut devenir politiquement fragile.
+
+## Une action par vampire et par nuit
+
+Une soumission V0.8 doit contenir **exactement une action pour chaque vampire actif du clan**. Un même vampire ne peut pas agir deux fois.
+
+Le joueur choisit les missions, mais un membre de l'opposition n'est pas un pion : selon sa relation effective et la nature de la mission, il peut coopérer ou refuser. Un opposant qui refuse consacre actuellement sa nuit à renforcer ses propres réseaux.
+
+Actions V0.8 :
+
+- **Développer son influence** ;
+- **Diplomatie** ;
+- **Consolider une relation** avec un membre du clan ;
+- **Recruter** un membre de l'autre coterie ;
+- **Fragiliser** la relation d'un vampire étranger avec son Primogène ;
+- **Débaucher** une cible politiquement fragile vers l'opposition de son propre clan ;
+- **Enquêter** sur un autre clan.
+
+### Opposition utile
+
+L'idéologie de l'acteur compte dans les interactions politiques. Un membre de l'opposition peut être un meilleur diplomate que le Primogène face à un interlocuteur idéologiquement compatible. Le clan peut donc bénéficier de sa réussite tout en renforçant personnellement un rival intérieur.
+
+La diplomatie peut créer des relations personnelles entre vampires en plus d'améliorer les rapports entre clans.
+
+## Brouillard de guerre
+
+Les Primogènes étrangers sont publics. Les autres membres, leurs coteries, leur relation réelle au Primogène et leur influence interne restent cachés tant qu'ils ne sont pas découverts.
+
+L'action **Enquêter** produit progressivement du renseignement :
+
+- niveau 1 : identité d'un membre étranger ;
+- niveau 2 : coterie, relation effective et influence connues.
+
+Cela permet ensuite de cibler les vampires vulnérables avec Fragiliser ou Débaucher.
+
+## Praxis et opposition
+
+Lors d'un vote de Praxis :
+
+- si l'opposition soutient son Primogène, **100 % de l'influence du clan** suit son vote ;
+- si elle refuse, la coterie du Primogène reste entièrement derrière lui ;
+- l'influence de l'opposition est divisée selon `opposition_transfer_ratio` ;
+- par défaut, **50 %** de l'influence d'opposition reste au Primogène et **50 %** renforce le Primogène allié choisi par l'opposition.
+
+Cette règle reste configurable et testée.
+
+## Identité et multijoueur asynchrone
+
+- Supabase Auth fournit l'identité persistante du joueur ;
+- un compte contrôle un seul clan dans la chronique ;
+- un clan ne peut être occupé que par un seul compte ;
+- les ordres sont persistés et peuvent être retirés tant que la nuit reste `OPEN` ;
+- après validation des trois clans : `READY -> RESOLVING -> RESOLVED` ;
+- la résolution globale reste unique et atomique ;
+- chaque clan reçoit son propre rapport ;
 - l'Elysium reste accessible pendant l'attente ;
-- une demande d'Étreinte est portée officiellement par le Primogène au nom d'un membre précis du clan.
+- les demandes d'Étreinte restent portées par le Primogène au nom d'un membre précis du clan.
 
-Le moteur conserve Praxis, incompatibilité Prince/Primogène, successions, quatre courants idéologiques, dissidence courant par courant, affinités politiques et capital politique du Prince.
+## Compatibilité des sauvegardes
+
+Aucune migration SQL Supabase n'est nécessaire pour V0.8 : l'état politique et les ordres restent sérialisés dans les JSON existants.
+
+La lecture est rétrocompatible :
+
+- les sauvegardes V0.6/V0.7 sans coteries sont converties automatiquement ;
+- la relation 0–2 est dérivée des anciennes données lorsqu'elle manque ;
+- les anciennes soumissions V0.7 sans `actor_character_id` restent résolubles ;
+- une même nuit peut donc contenir une soumission V0.7 déjà persistée et de nouvelles soumissions V0.8.
+
+Les données vivantes de la chronique ne sont pas réinitialisées.
 
 ## Persistance et sécurité
 
-`game/persistence.py` définit le contrat `GameRepository` et conserve SQLite pour le développement local et les tests.
+`game/persistence.py` définit le contrat `GameRepository` et SQLite reste disponible pour le développement local et les tests. `game/supabase_repository.py` fournit la persistance distante PostgreSQL/Supabase.
 
-`game/supabase_repository.py` fournit la persistance distante PostgreSQL/Supabase. `game/editable_repository.py` ajoute la consultation et la reprise des ordres de nuit sans mélanger cette logique avec le moteur politique. Le schéma reproductible se trouve dans `supabase/schema.sql`.
-
-Le projet Supabase dédié est `WoD-rpg` (`eu-west-3`). En production, Streamlit utilise Supabase comme source persistante de la chronique. Les tables de jeu ne sont jamais utilisées directement par le navigateur : `anon` et `authenticated` n'ont aucun accès direct à l'état complet, aux ordres ou aux rapports. Les transitions critiques de nuit sont effectuées côté serveur et atomiquement dans PostgreSQL.
-
-La sérialisation V0.7 sait encore lire les personnages stockés au format V0.6 et convertit automatiquement les anciens axes numériques en polarités +/-.
-
-Supabase Auth sert uniquement à établir l'identité réelle du joueur. Le serveur Streamlit valide la session auprès de Supabase Auth avant d'utiliser l'UUID du compte comme `player_id`.
+En production, Streamlit utilise Supabase. Les transitions critiques de nuit sont effectuées côté serveur et atomiquement dans PostgreSQL. GitHub contient le code et les contenus statiques, jamais les sauvegardes vivantes.
 
 Secrets Streamlit nécessaires :
 
@@ -86,61 +137,30 @@ SUPABASE_URL = "https://kxsutwksruraladbatti.supabase.co"
 SUPABASE_SECRET_KEY = "<secret serveur Supabase>"
 ```
 
-La clé publique Auth peut également être fournie explicitement :
+La clé publique Auth peut également être fournie :
 
 ```toml
 SUPABASE_PUBLISHABLE_KEY = "<clé sb_publishable_...>"
 ```
 
-`SUPABASE_SECRET_KEY` est strictement serveur et ne doit **jamais** être commité, envoyé au navigateur ou partagé. GitHub contient le code, la configuration reproductible et les contenus statiques, jamais les sauvegardes vivantes d'une chronique.
+`SUPABASE_SECRET_KEY` reste strictement serveur.
 
 ## Architecture
 
 - `game/models.py` : modèles de domaine et fiche de personnage ;
-- `game/character_rules.py` : résolution compacte des capacités personnelles ;
-- `game/ideology.py` : axes +/- et courants dynamiques ;
-- `game/politics.py` : dissidences et vote de Praxis ;
-- `game/actions.py` : actions politiques ;
+- `game/character_rules.py` : résolution compacte des capacités ;
+- `game/ideology.py` : convictions Humanité/Traditions et affinités ;
+- `game/coteries.py` : deux coteries, chef d'opposition, relations effectives et influence ;
+- `game/politics.py` : vote de Praxis et transfert d'influence d'opposition ;
+- `game/actions.py` : actions individuelles ;
 - `game/offices.py` : Prince, Primogènes et successions ;
 - `game/embrace.py` : demandes d'Étreinte ;
 - `game/resolution.py` : résolution globale d'une nuit ;
-- `game/serialization.py` : sérialisation JSON stable et compatibilité V0.6 ;
-- `game/auth.py` : authentification Supabase et validation des sessions joueur ;
-- `game/persistence.py` : contrat de stockage + SQLite local ;
-- `game/supabase_repository.py` : stockage distant Supabase via Data API ;
-- `game/editable_repository.py` : extension des dépôts pour consultation/retrait d'ordres ;
-- `game/repository_factory.py` : sélection du backend de persistance ;
+- `game/serialization.py` : sérialisation et migrations rétrocompatibles ;
 - `game/multiplayer.py` : orchestration joueur/clan/nuit ;
-- `supabase/schema.sql` : schéma PostgreSQL et fonctions atomiques ;
+- `game/persistence.py`, `game/supabase_repository.py` : persistance ;
 - `app.py` : interface Streamlit ;
-- `tests/` : tests automatisés.
-
-## Cycle d'une nuit
-
-```text
-Nuit N ouverte
-   |
-   +-- Ventrue prépare / valide
-   +-- Toreador prépare / valide
-   +-- Brujah prépare / valide
-   |
-   |  tant que la nuit est OPEN : validation annulable
-   |
-   +-- trois validations
-          |
-          v
-        READY
-          |
-          v
-      RESOLVING
-          |
-          v
-       RESOLVED
-          |
-          +-- rapports privés par clan
-          +-- état persistant mis à jour
-          +-- Nuit N+1 ouverte
-```
+- `tests/` : tests automatisés, dont un smoke test Streamlit.
 
 ## Tests
 
@@ -150,9 +170,9 @@ pytest -q
 
 ## Suite cible
 
-1. brancher progressivement les nouvelles caractéristiques, Expertises, Disciplines et Historiques sur les actions politiques concrètes ;
-2. approfondir la **politique interne autonome** : demandes, ambitions, pressions et réactions des membres et courants ;
-3. enrichir les rapports de nuit et le **brouillard de guerre** ;
-4. développer le **Prince comme acteur politique autonome** et approfondir les contestations de Praxis ;
-5. ajouter relations personnelles, faveurs et dettes ;
-6. développer territoires, institutions, stabilité, Mascarade, Elysium et factions PNJ.
+1. enrichir l'autonomie des membres : ambitions, demandes, refus contextualisés et initiatives propres ;
+2. ajouter faveurs, dettes et contreparties aux missions ;
+3. approfondir le brouillard de guerre et les informations partielles ;
+4. développer le Prince comme acteur autonome et les contestations de Praxis ;
+5. développer territoires, institutions, stabilité et Mascarade ;
+6. enrichir Elysium, diplomatie et factions PNJ.

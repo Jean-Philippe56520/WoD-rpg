@@ -13,12 +13,35 @@ def make_service(tmp_path):
     return service, repo
 
 
-def orders_for(state, clan_id, action_type=ActionType.BUILD_INFLUENCE):
+def legacy_orders_for(state, clan_id, action_type=ActionType.BUILD_INFLUENCE):
     primogen_id = state.clan_states[clan_id].clan.primogen_id
     return ClanNightOrders(
         clan_id=clan_id,
         actions=(GameAction(clan_id, action_type),),
         vote=PrimogenVote(primogen_id, primogen_id),
+        version=1,
+    )
+
+
+def v08_orders_for(state, clan_id):
+    primogen_id = state.clan_states[clan_id].clan.primogen_id
+    members = [
+        character
+        for character in state.characters.values()
+        if character.clan_id == clan_id and character.id != state.prince_id
+    ]
+    return ClanNightOrders(
+        clan_id=clan_id,
+        actions=tuple(
+            GameAction(
+                clan_id,
+                ActionType.BUILD_INFLUENCE,
+                actor_character_id=member.id,
+            )
+            for member in members
+        ),
+        vote=PrimogenVote(primogen_id, primogen_id),
+        version=2,
     )
 
 
@@ -27,19 +50,62 @@ def test_players_submit_only_their_own_clan(tmp_path):
     service.claim_clan("p1", "Alice", "ventrue")
     state = repo.get_game_state(DEFAULT_GAME_ID)
     with pytest.raises(ValueError, match="player's clan"):
-        service.submit_orders("p1", orders_for(state, "brujah"))
+        service.submit_orders("p1", v08_orders_for(state, "brujah"))
 
 
-def test_third_submission_resolves_once_and_advances_global_night(tmp_path):
+def test_v08_requires_exactly_one_action_for_every_active_member(tmp_path):
+    service, repo = make_service(tmp_path)
+    service.claim_clan("p1", "Alice", "ventrue")
+    state = repo.get_game_state(DEFAULT_GAME_ID)
+    primogen_id = state.clan_states["ventrue"].clan.primogen_id
+    incomplete = ClanNightOrders(
+        clan_id="ventrue",
+        actions=(
+            GameAction(
+                "ventrue",
+                ActionType.BUILD_INFLUENCE,
+                actor_character_id=primogen_id,
+            ),
+        ),
+        vote=PrimogenVote(primogen_id, primogen_id),
+        version=2,
+    )
+    with pytest.raises(ValueError, match="exactly one action"):
+        service.submit_orders("p1", incomplete)
+
+
+def test_v08_rejects_duplicate_actor_even_when_action_count_matches(tmp_path):
+    service, repo = make_service(tmp_path)
+    service.claim_clan("p1", "Alice", "ventrue")
+    state = repo.get_game_state(DEFAULT_GAME_ID)
+    primogen_id = state.clan_states["ventrue"].clan.primogen_id
+    duplicate = ClanNightOrders(
+        clan_id="ventrue",
+        actions=tuple(
+            GameAction(
+                "ventrue",
+                ActionType.BUILD_INFLUENCE,
+                actor_character_id=primogen_id,
+            )
+            for _ in range(4)
+        ),
+        vote=PrimogenVote(primogen_id, primogen_id),
+        version=2,
+    )
+    with pytest.raises(ValueError, match="only one action"):
+        service.submit_orders("p1", duplicate)
+
+
+def test_third_v08_submission_resolves_once_and_advances_global_night(tmp_path):
     service, repo = make_service(tmp_path)
     state = repo.get_game_state(DEFAULT_GAME_ID)
     players = (("p1", "Alice", "ventrue"), ("p2", "Bob", "toreador"), ("p3", "Cara", "brujah"))
     for player_id, name, clan_id in players:
         service.claim_clan(player_id, name, clan_id)
 
-    assert service.submit_orders("p1", orders_for(state, "ventrue")) is False
-    assert service.submit_orders("p2", orders_for(state, "toreador")) is False
-    assert service.submit_orders("p3", orders_for(state, "brujah")) is True
+    assert service.submit_orders("p1", v08_orders_for(state, "ventrue")) is False
+    assert service.submit_orders("p2", v08_orders_for(state, "toreador")) is False
+    assert service.submit_orders("p3", v08_orders_for(state, "brujah")) is True
 
     info = repo.get_game_info(DEFAULT_GAME_ID)
     assert info["current_night"] == 2
@@ -49,17 +115,30 @@ def test_third_submission_resolves_once_and_advances_global_night(tmp_path):
         assert report is not None
 
 
-def test_reports_hide_other_clans_private_actions(tmp_path):
+def test_mixed_v07_and_v08_submissions_can_finish_same_persisted_night(tmp_path):
     service, repo = make_service(tmp_path)
     state = repo.get_game_state(DEFAULT_GAME_ID)
     players = (("p1", "Alice", "ventrue"), ("p2", "Bob", "toreador"), ("p3", "Cara", "brujah"))
     for player_id, name, clan_id in players:
         service.claim_clan(player_id, name, clan_id)
-    service.submit_orders("p1", orders_for(state, "ventrue", ActionType.CONSOLIDATE))
-    service.submit_orders("p2", orders_for(state, "toreador", ActionType.BUILD_INFLUENCE))
-    service.submit_orders("p3", orders_for(state, "brujah", ActionType.BUILD_INFLUENCE))
+
+    assert service.submit_orders("p1", legacy_orders_for(state, "ventrue", ActionType.CONSOLIDATE)) is False
+    assert service.submit_orders("p2", v08_orders_for(state, "toreador")) is False
+    assert service.submit_orders("p3", v08_orders_for(state, "brujah")) is True
+    assert repo.get_game_info(DEFAULT_GAME_ID)["current_night"] == 2
+
+
+def test_reports_hide_other_clans_private_member_actions(tmp_path):
+    service, repo = make_service(tmp_path)
+    state = repo.get_game_state(DEFAULT_GAME_ID)
+    players = (("p1", "Alice", "ventrue"), ("p2", "Bob", "toreador"), ("p3", "Cara", "brujah"))
+    for player_id, name, clan_id in players:
+        service.claim_clan(player_id, name, clan_id)
+    service.submit_orders("p1", v08_orders_for(state, "ventrue"))
+    service.submit_orders("p2", v08_orders_for(state, "toreador"))
+    service.submit_orders("p3", v08_orders_for(state, "brujah"))
 
     ventrue = " ".join(repo.get_report(DEFAULT_GAME_ID, 1, "ventrue").items)
     toreador = " ".join(repo.get_report(DEFAULT_GAME_ID, 1, "toreador").items)
-    assert "Ventrue consolide" in ventrue
-    assert "Ventrue consolide" not in toreador
+    assert "Victor de Keravel développe ses réseaux" in ventrue
+    assert "Victor de Keravel développe ses réseaux" not in toreador

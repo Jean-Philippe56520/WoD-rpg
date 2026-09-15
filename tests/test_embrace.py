@@ -1,14 +1,20 @@
 import pytest
 
 from game.config import DEFAULT_RULES
+from game.coteries import coterie_influence
 from game.embrace import (
     calculate_embrace_cost,
     create_embrace_request,
     decide_embrace_request,
     process_primogen_petition,
 )
-from game.ideology import build_currents, character_current_id
-from game.models import Candidate, EmbracePetitionOrder, EmbraceStatus, PrimogenPosition
+from game.models import (
+    Candidate,
+    CoterieSide,
+    EmbracePetitionOrder,
+    EmbraceStatus,
+    PrimogenPosition,
+)
 from game.offices import install_prince
 from game.world import create_initial_game_state
 
@@ -22,22 +28,22 @@ def state_with_ventrue_prince():
     return state
 
 
-def test_embrace_cost_rewards_external_and_primogen_aligned_request():
+def test_embrace_cost_rewards_external_and_primogen_coterie_request():
     state = state_with_ventrue_prince()
     cost = calculate_embrace_cost(state, "toreador_camille", PrimogenPosition.SUPPORT)
     assert cost == 4
 
 
-def test_embrace_cost_penalises_same_clan_rival_current_against_primogen():
+def test_embrace_cost_penalises_same_clan_opposition_request_against_primogen():
     state = state_with_ventrue_prince()
+    assert state.clan_states["ventrue"].coterie_memberships["ventrue_claire"] == CoterieSide.OPPOSITION
     cost = calculate_embrace_cost(state, "ventrue_claire", PrimogenPosition.OPPOSE)
     assert cost == 20
 
 
-def test_approval_deducts_capital_and_strengthens_requester_through_personal_influence():
+def test_approval_deducts_capital_and_strengthens_requesters_coterie_influence():
     state = state_with_ventrue_prince()
-    current_id = character_current_id(state.characters["toreador_camille"])
-    before_current = build_currents(state, "toreador")[current_id].influence
+    before_coterie = coterie_influence(state, "toreador", CoterieSide.PRIMOGEN)
     before_personal = state.characters["toreador_camille"].personal_influence
     state = create_embrace_request(
         state, "toreador_camille", "Adele", PrimogenPosition.SUPPORT
@@ -47,27 +53,29 @@ def test_approval_deducts_capital_and_strengthens_requester_through_personal_inf
     assert request.status == EmbraceStatus.APPROVED
     assert state.prince_political_capital == DEFAULT_RULES.prince_initial_capital - request.political_cost
     assert state.characters["toreador_camille"].personal_influence == before_personal + DEFAULT_RULES.embrace_requester_influence_gain
-    assert build_currents(state, "toreador")[current_id].influence == before_current + DEFAULT_RULES.embrace_requester_influence_gain
+    assert coterie_influence(state, "toreador", CoterieSide.PRIMOGEN) == before_coterie + DEFAULT_RULES.embrace_requester_influence_gain
     assert state.prince_relations["toreador"] == DEFAULT_RULES.approve_relation_support
 
 
-def test_refusal_changes_loyalty_of_requesters_specific_rival_current():
+def test_refusal_changes_prince_relation_without_artificially_moving_opposition_member():
     state = state_with_ventrue_prince()
-    current_id = character_current_id(state.characters["brujah_sarah"])
-    before = state.clan_states["brujah"].current_loyalties[current_id]
-    state = create_embrace_request(state, "brujah_sarah", "Noe", PrimogenPosition.OPPOSE)
+    sarah = state.characters["brujah_sarah"]
+    before_relation = sarah.relation_to_primogen
+    before_side = state.clan_states["brujah"].coterie_memberships[sarah.id]
+    state = create_embrace_request(state, sarah.id, "Noe", PrimogenPosition.OPPOSE)
     state = decide_embrace_request(state, "embrace_1", False)
     assert state.embrace_requests["embrace_1"].status == EmbraceStatus.REFUSED
     assert state.prince_relations["brujah"] == DEFAULT_RULES.refuse_relation_oppose
-    assert state.clan_states["brujah"].current_loyalties[current_id] == before + DEFAULT_RULES.rival_loyalty_refuse_oppose
+    assert state.characters[sarah.id].relation_to_primogen == before_relation
+    assert state.clan_states["brujah"].coterie_memberships[sarah.id] == before_side
 
 
-def test_primogen_current_request_does_not_create_rival_loyalty_side_effect():
+def test_primogen_coterie_request_remains_in_same_coterie_after_refusal():
     state = state_with_ventrue_prince()
-    before = dict(state.clan_states["toreador"].current_loyalties)
+    before = state.clan_states["toreador"].coterie_memberships["toreador_camille"]
     state = create_embrace_request(state, "toreador_camille", "Mila", PrimogenPosition.SUPPORT)
     state = decide_embrace_request(state, "embrace_1", False)
-    assert state.clan_states["toreador"].current_loyalties == before
+    assert state.clan_states["toreador"].coterie_memberships["toreador_camille"] == before
 
 
 def test_approval_fails_when_prince_lacks_capital():

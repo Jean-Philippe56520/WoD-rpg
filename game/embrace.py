@@ -3,8 +3,9 @@ from __future__ import annotations
 from copy import deepcopy
 
 from .config import DEFAULT_RULES, GameRules
-from .ideology import character_current_id, initialize_current_politics, primogen_current_id
+from .coteries import initialize_coteries
 from .models import (
+    CoterieSide,
     EmbracePetitionOrder,
     EmbraceRequest,
     EmbraceStatus,
@@ -12,10 +13,6 @@ from .models import (
     GameState,
     PrimogenPosition,
 )
-
-
-def _clamp(value: float, minimum: float = 0.0, maximum: float = 100.0) -> float:
-    return max(minimum, min(maximum, value))
 
 
 def _position_modifier(position: PrimogenPosition, rules: GameRules) -> float:
@@ -37,6 +34,7 @@ def calculate_embrace_cost(
     if requester_id not in state.characters:
         raise ValueError(f"Unknown requester: {requester_id}")
 
+    initialize_coteries(state)
     requester = state.characters[requester_id]
     if not requester.clan_id or requester.clan_id not in state.clan_states:
         raise ValueError("Requester must belong to a playable clan")
@@ -52,9 +50,10 @@ def calculate_embrace_cost(
         else:
             cost += rules.embrace_other_clan_modifier
 
-    requester_current = character_current_id(requester)
-    primary_current = primogen_current_id(state, requester.clan_id)
-    if requester_current == primary_current:
+    requester_side = state.clan_states[requester.clan_id].coterie_memberships.get(
+        requester.id, CoterieSide.PRIMOGEN
+    )
+    if requester_side == CoterieSide.PRIMOGEN:
         cost += rules.embrace_primogen_current_modifier
     else:
         cost += rules.embrace_rival_current_modifier
@@ -75,6 +74,7 @@ def create_embrace_request(
         raise ValueError("A proposed childe name is required")
 
     next_state = deepcopy(state)
+    initialize_coteries(next_state)
     requester = next_state.characters.get(requester_id)
     if requester is None or not requester.clan_id:
         raise ValueError("Requester must be a known clan member")
@@ -104,7 +104,7 @@ def create_embrace_request(
             category="embrace",
             message=(
                 f"{primogen.name}, au nom de {requester.name}, demande au Prince l'autorisation "
-                f"d'Etreindre {request.proposed_childe_name}. Cout politique estime : {cost:.0f}."
+                f"d'Étreindre {request.proposed_childe_name}. Coût politique estimé : {cost:.0f}."
             ),
             audience_clan_ids=(requester.clan_id,),
         )
@@ -128,22 +128,6 @@ def _relation_delta(approve: bool, position: PrimogenPosition, rules: GameRules)
     return mapping[approve][position]
 
 
-def _rival_loyalty_delta(approve: bool, position: PrimogenPosition, rules: GameRules) -> float:
-    mapping = {
-        True: {
-            PrimogenPosition.SUPPORT: rules.rival_loyalty_approve_support,
-            PrimogenPosition.NEUTRAL: rules.rival_loyalty_approve_neutral,
-            PrimogenPosition.OPPOSE: rules.rival_loyalty_approve_oppose,
-        },
-        False: {
-            PrimogenPosition.SUPPORT: rules.rival_loyalty_refuse_support,
-            PrimogenPosition.NEUTRAL: rules.rival_loyalty_refuse_neutral,
-            PrimogenPosition.OPPOSE: rules.rival_loyalty_refuse_oppose,
-        },
-    }
-    return mapping[approve][position]
-
-
 def decide_embrace_request(
     state: GameState,
     request_id: str,
@@ -161,10 +145,6 @@ def decide_embrace_request(
         raise ValueError("This embrace request has already been decided")
 
     requester = next_state.characters[request.requester_id]
-    clan_state = next_state.clan_states[requester.clan_id]
-    requester_current = character_current_id(requester)
-    primary_current = primogen_current_id(next_state, requester.clan_id)
-
     if approve:
         if next_state.prince_political_capital < request.political_cost:
             raise ValueError("Insufficient Prince political capital")
@@ -182,20 +162,14 @@ def decide_embrace_request(
         + _relation_delta(approve, request.primogen_position, rules)
     )
 
-    if requester_current and requester_current != primary_current:
-        before = clan_state.current_loyalties.get(requester_current, rules.current_default_loyalty)
-        clan_state.current_loyalties[requester_current] = _clamp(
-            before + _rival_loyalty_delta(approve, request.primogen_position, rules)
-        )
-
-    initialize_current_politics(next_state, rules)
+    initialize_coteries(next_state)
     prince = next_state.characters[next_state.prince_id]
     next_state.events.append(
         GameEvent(
             night=next_state.night,
             category="embrace",
             message=(
-                f"{prince.name} {decision_word} la demande portee par le Primogene de "
+                f"{prince.name} {decision_word} la demande portée par le Primogène de "
                 f"{requester.name} concernant {request.proposed_childe_name}."
             ),
             audience_clan_ids=(requester.clan_id,),

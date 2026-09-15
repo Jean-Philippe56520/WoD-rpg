@@ -1,6 +1,5 @@
 from game.config import DEFAULT_RULES
-from game.ideology import primogen_current_id
-from game.models import Candidate
+from game.models import Candidate, CoterieSide
 from game.offices import install_prince, succession_score
 from game.world import create_initial_game_state
 
@@ -14,33 +13,57 @@ def ventrue_winner(state):
     )
 
 
-def test_installing_primogen_prince_updates_foreign_current_alliances():
+def test_installing_primogen_prince_updates_foreign_opposition_alliance():
     state = create_initial_game_state()
-    current_id = "toreador__predatory_traditional"
-    assert state.clan_states["toreador"].current_allies[current_id] == "primogen_ventrue"
+    assert state.clan_states["brujah"].opposition_allied_primogen_id == "primogen_ventrue"
     install_prince(state, ventrue_winner(state))
     successor_id = state.clan_states["ventrue"].clan.primogen_id
-    assert state.clan_states["toreador"].current_allies[current_id] == successor_id
+    assert successor_id == "ventrue_victor"
+    assert state.clan_states["brujah"].opposition_allied_primogen_id == successor_id
 
 
-def test_successor_selection_uses_dynamic_current_influence():
-    state = create_initial_game_state()
-    install_prince(state, ventrue_winner(state))
-    assert state.clan_states["ventrue"].clan.primogen_id == "ventrue_victor"
-    assert primogen_current_id(state, "ventrue") == "ventrue__predatory_traditional"
-
-
-def test_rival_current_candidate_can_take_primogeniture_if_balance_changes():
-    state = create_initial_game_state()
-    state.characters["ventrue_claire"].personal_influence = 100
-    install_prince(state, ventrue_winner(state), DEFAULT_RULES)
-    assert state.clan_states["ventrue"].clan.primogen_id == "ventrue_claire"
-    assert primogen_current_id(state, "ventrue") == "ventrue__humanist_reformist"
-    assert "ventrue__predatory_traditional" in state.clan_states["ventrue"].current_loyalties
-
-
-def test_current_weight_contributes_to_succession_score():
+def test_successor_selection_uses_coterie_influence_and_personal_position():
     state = create_initial_game_state()
     victor = state.characters["ventrue_victor"]
     helene = state.characters["ventrue_helene"]
     assert succession_score(state, victor) > succession_score(state, helene)
+    install_prince(state, ventrue_winner(state))
+    assert state.clan_states["ventrue"].clan.primogen_id == "ventrue_victor"
+
+
+def test_relations_to_primogen_are_rebased_on_new_holder_after_succession():
+    state = create_initial_game_state()
+    state.characters["ventrue_helene"].relations["ventrue_victor"] = 2
+    state.characters["ventrue_claire"].relation_to_primogen = 0
+
+    install_prince(state, ventrue_winner(state))
+
+    assert state.clan_states["ventrue"].clan.primogen_id == "ventrue_victor"
+    assert state.characters["ventrue_victor"].relation_to_primogen == 2
+    assert state.characters["ventrue_helene"].relation_to_primogen == 2
+    assert state.characters["ventrue_claire"].relation_to_primogen == 1
+
+
+def test_opposition_candidate_can_take_primogeniture_if_balance_changes():
+    state = create_initial_game_state()
+    state.characters["ventrue_claire"].personal_influence = 100
+    install_prince(state, ventrue_winner(state), DEFAULT_RULES)
+
+    clan_state = state.clan_states["ventrue"]
+    assert clan_state.clan.primogen_id == "ventrue_claire"
+    assert clan_state.coterie_memberships["ventrue_claire"] == CoterieSide.PRIMOGEN
+    assert clan_state.opposition_leader_id == "ventrue_helene"
+
+    claire = state.characters["ventrue_claire"]
+    new_leader = state.characters[clan_state.opposition_leader_id]
+    assert (
+        new_leader.humanity_axis != claire.humanity_axis
+        or new_leader.tradition_axis != claire.tradition_axis
+    )
+
+
+def test_prince_is_removed_from_clan_coterie_after_installation():
+    state = create_initial_game_state()
+    install_prince(state, ventrue_winner(state))
+    assert "primogen_ventrue" not in state.clan_states["ventrue"].coterie_memberships
+    assert state.characters["primogen_ventrue"].is_primogen is False
