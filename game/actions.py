@@ -97,6 +97,40 @@ def _diplomacy_target(state: GameState, action: GameAction) -> Character:
     return state.characters[state.clan_states[target_clan_id].clan.primogen_id]
 
 
+def _investigation_target(state: GameState, action: GameAction) -> Character:
+    if action.target_character_id:
+        target = _resolve_target_character(state, action)
+        if target.clan_id == action.clan_id:
+            raise ValueError("Investigation is intended for another clan")
+        return target
+
+    target_clan_id = action.target_clan_id
+    if not target_clan_id or target_clan_id == action.clan_id:
+        raise ValueError("Investigation requires another target clan")
+    if target_clan_id not in state.clan_states:
+        raise ValueError(f"Unknown target clan: {target_clan_id}")
+
+    target_primogen_id = state.clan_states[target_clan_id].clan.primogen_id
+    candidates = [
+        character
+        for character in state.characters.values()
+        if character.clan_id == target_clan_id
+        and character.id != target_primogen_id
+        and character.id != state.prince_id
+    ]
+    if not candidates:
+        raise ValueError("No hidden clan member is available to investigate")
+    intel = state.clan_states[action.clan_id].known_character_intel
+    return min(
+        candidates,
+        key=lambda character: (
+            intel.get(character.id, 0),
+            -character.personal_influence,
+            character.id,
+        ),
+    )
+
+
 def _opposition_accepts(state: GameState, action: GameAction, actor: Character) -> bool:
     clan_state = state.clan_states[action.clan_id]
     side = clan_state.coterie_memberships.get(actor.id, CoterieSide.PRIMOGEN)
@@ -111,8 +145,6 @@ def _opposition_accepts(state: GameState, action: GameAction, actor: Character) 
     if relation <= 0:
         return False
 
-    # À relation moyenne, l'opposant coopère surtout lorsque la mission correspond
-    # à ses affinités ou sert clairement l'information du clan.
     if action.action_type == ActionType.INVESTIGATE:
         return True
     if action.action_type == ActionType.DIPLOMACY:
@@ -195,8 +227,8 @@ def apply_action(
 
     elif action.action_type == ActionType.CONSOLIDATE_RELATION:
         target = _resolve_target_character(state, action)
-        if target.clan_id != action.clan_id or target.id == clan.primogen_id:
-            raise ValueError("Consolidation must target another member of the acting clan")
+        if target.clan_id != action.clan_id or target.id == clan.primogen_id or target.id == actor.id:
+            raise ValueError("Consolidation must target another non-Primogen member of the acting clan")
         affinity = ideology_relation_modifier(actor, target)
         score = _political_score(
             actor,
@@ -293,16 +325,12 @@ def apply_action(
         if score >= rules.poach_base_difficulty:
             set_coterie_side(state, target.id, CoterieSide.OPPOSITION)
             actor.relations[target.id] = _clamp_int(actor.relations.get(target.id, 0) + 1)
-            message = (
-                f"{actor.name} convainc {target.name} de rejoindre l'opposition de son clan."
-            )
+            message = f"{actor.name} convainc {target.name} de rejoindre l'opposition de son clan."
         else:
             message = f"{actor.name} tente de débaucher {target.name}, sans provoquer de défection."
 
     elif action.action_type == ActionType.INVESTIGATE:
-        target = _resolve_target_character(state, action)
-        if target.clan_id == action.clan_id:
-            raise ValueError("Investigation is intended for another clan")
+        target = _investigation_target(state, action)
         score = _political_score(
             actor,
             CharacterAttribute.MENTAL,
@@ -315,18 +343,15 @@ def apply_action(
             difficulty += 1
         before = clan_state.known_character_intel.get(target.id, 0)
         if score >= difficulty:
-            clan_state.known_character_intel[target.id] = min(
-                rules.max_intel_level, before + 1
-            )
+            clan_state.known_character_intel[target.id] = min(rules.max_intel_level, before + 1)
             message = (
                 f"{actor.name} obtient de nouveaux renseignements sur {target.name} : "
                 f"niveau {before} → {clan_state.known_character_intel[target.id]}."
             )
         else:
-            message = f"{actor.name} enquête sur {target.name}, sans information exploitable."
+            message = f"{actor.name} enquête sur le réseau de {target.clan_id}, sans information exploitable."
 
     elif action.action_type == ActionType.CONSOLIDATE:
-        # Ancien ordre V0.7 : conservé pour qu'une nuit déjà soumise reste résoluble.
         actor.personal_influence += rules.consolidate_influence_gain
         message = (
             f"{actor.name} termine une action de consolidation préparée avant la V0.8 : "
