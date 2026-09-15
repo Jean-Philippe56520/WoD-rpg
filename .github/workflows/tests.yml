@@ -24,6 +24,9 @@ jobs:
       - name: Generate deterministic QA scenario report
         if: always()
         run: python scripts/qa_snapshot_report.py --output qa-report.json
+      - name: Generate Paris lore coverage report
+        if: always()
+        run: python scripts/lore_audit_report.py --output lore-audit-report.json
       - name: Upload QA diagnostics
         if: always()
         uses: actions/upload-artifact@v4
@@ -32,4 +35,5 @@ jobs:
           path: |
             qa-results.xml
             qa-report.json
+            lore-audit-report.json
           if-no-files-found: warn
