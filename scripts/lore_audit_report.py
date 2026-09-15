@@ -12,15 +12,24 @@ if str(ROOT) not in sys.path:
 from game.lore_catalog import PARIS_CORPUS_SOURCES, corpus_audit_report, validate_source_catalog
 from game.paris_corpus import CONFLICTS, paris_1435_audit_report, validate_paris_corpus
 from game.paris_coverage import PARIS_CORPUS_AREAS, coverage_report, validate_paris_coverage
+from game.paris_roster import (
+    OPEN_ROSTER_GAPS,
+    PARIS_1435_ROSTER,
+    ROSTER_CONFLICTS,
+    roster_audit_report,
+    validate_paris_1435_roster,
+)
 
 
 def build_report(year: int = 1435) -> dict:
     validate_source_catalog()
     validate_paris_corpus()
     validate_paris_coverage()
+    validate_paris_1435_roster()
     source_report = corpus_audit_report(year)
     paris_report = paris_1435_audit_report()
     area_report = coverage_report()
+    roster_report = roster_audit_report()
     unresolved_sources = [
         {
             "key": source.key,
@@ -48,12 +57,41 @@ def build_report(year: int = 1435) -> dict:
     priority_1435_incomplete = [
         area for area in incomplete_areas if area["priority_1435"]
     ]
+    roster_entries = [
+        {
+            "id": entry.id,
+            "label": entry.label,
+            "kind": entry.kind,
+            "clan_id": entry.clan_id,
+            "status": entry.status,
+            "location": entry.location,
+            "certainty": entry.certainty,
+            "simulation_policy": entry.simulation_policy,
+            "source_keys": list(entry.source_keys),
+            "note": entry.note,
+        }
+        for entry in PARIS_1435_ROSTER
+    ]
     return {
-        "schema_version": 2,
+        "schema_version": 3,
         "year": year,
         "sources": source_report,
         "coverage": area_report,
         "paris_1435": paris_report,
+        "roster_1435": roster_report,
+        "roster_entries": roster_entries,
+        "roster_open_gaps": list(OPEN_ROSTER_GAPS),
+        "roster_conflicts": [
+            {
+                "id": conflict.id,
+                "title": conflict.title,
+                "source_keys": list(conflict.source_keys),
+                "claims": list(conflict.claims),
+                "preferred_interpretation": conflict.preferred_interpretation,
+                "note": conflict.note,
+            }
+            for conflict in ROSTER_CONFLICTS
+        ],
         "open_conflicts": [
             {
                 "id": conflict.id,
@@ -82,6 +120,7 @@ def main() -> None:
     sources = report["sources"]
     coverage = report["coverage"]
     paris = report["paris_1435"]
+    roster = report["roster_1435"]
     print(
         f"Lore audit {args.year}: sources={sources['sources_total']} "
         f"audited={sources['audited']} relevant={sources['relevant_total']} "
@@ -95,6 +134,11 @@ def main() -> None:
     print(
         f"Paris 1435: facts={paris['facts']} conflicts={paris['conflicts']} "
         f"presence={paris['presence_entries']} unverified={paris['unverified_presence']}"
+    )
+    print(
+        f"Roster 1435: entries={roster['entries_total']} named={roster['named_total']} "
+        f"collectives={roster['collective_total']} active_named={roster['simulation_active_named']} "
+        f"open_gaps={roster['open_gaps']} conflicts={roster['roster_conflicts']}"
     )
     print(f"Report -> {output}")
 
