@@ -154,6 +154,7 @@ class Character:
     mortal_stance: MortalStance = MortalStance.HUMANIST
     order_stance: OrderStance = OrderStance.ORTHODOX
     humanity: int = 7
+    hunger: int = 1
     status: int = 1
     reputation: int = 0
     political_ambition: PoliticalAmbition = PoliticalAmbition.INCREASE_INFLUENCE
@@ -186,6 +187,8 @@ class Character:
 
         if not isinstance(self.humanity, int) or isinstance(self.humanity, bool) or not 0 <= self.humanity <= 10:
             raise ValueError("Humanity must be an integer between 0 and 10")
+        if not isinstance(self.hunger, int) or isinstance(self.hunger, bool) or not 0 <= self.hunger <= 5:
+            raise ValueError("Hunger must be an integer between 0 and 5")
         if not isinstance(self.status, int) or isinstance(self.status, bool) or not 0 <= self.status <= 5:
             raise ValueError("Status must be an integer between 0 and 5")
         if not isinstance(self.reputation, int) or isinstance(self.reputation, bool) or not -3 <= self.reputation <= 3:
