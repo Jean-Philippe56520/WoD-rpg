@@ -1,15 +1,17 @@
 from __future__ import annotations
 
 from .config import DEFAULT_RULES, GameRules
-from .coteries import coterie_influence, initialize_coteries
+from .factions import faction_influence, initialize_factions
 from .models import (
-    AxisPolarity,
     BloodRank,
     Candidate,
     Character,
-    CoterieSide,
+    ClanFactionSide,
     GameEvent,
     GameState,
+    MortalStance,
+    OrderStance,
+    PoliticalAmbition,
 )
 
 
@@ -21,12 +23,13 @@ def succession_score(
     if character.clan_id is None:
         return float("-inf")
     clan_state = state.clan_states[character.clan_id]
-    side = clan_state.coterie_memberships.get(character.id, CoterieSide.PRIMOGEN)
+    side = clan_state.faction_memberships.get(character.id, ClanFactionSide.PRIMOGEN)
     return (
         character.personal_influence
-        + coterie_influence(state, character.clan_id, side) * rules.succession_current_weight
+        + faction_influence(state, character.clan_id, side) * rules.succession_current_weight
         + character.ambition * rules.succession_ambition_weight
         + character.relation_to_primogen * 5.0
+        + character.status * 2.0
     )
 
 
@@ -36,7 +39,7 @@ def choose_successor(
     outgoing_primogen_id: str,
     rules: GameRules = DEFAULT_RULES,
 ) -> Character:
-    initialize_coteries(state)
+    initialize_factions(state)
     eligible = [
         character
         for character in state.characters.values()
@@ -73,8 +76,9 @@ def _apply_succession(state: GameState, outgoing: Character, rules: GameRules) -
 
     successor = choose_successor(state, outgoing.clan_id, outgoing.id, rules)
     successor.is_primogen = True
+    successor.status = max(successor.status, 3)
     clan.primogen_id = successor.id
-    clan_state.coterie_memberships[successor.id] = CoterieSide.PRIMOGEN
+    clan_state.faction_memberships[successor.id] = ClanFactionSide.PRIMOGEN
     if clan_state.opposition_leader_id == successor.id:
         clan_state.opposition_leader_id = None
 
@@ -112,8 +116,12 @@ def install_prince(
             name=winner.name,
             clan_id=winner.clan_id,
             personal_influence=18,
-            humanity_axis=AxisPolarity.PLUS,
-            tradition_axis=AxisPolarity.PLUS,
+            mortal_stance=MortalStance.HUMANIST,
+            order_stance=OrderStance.ORTHODOX,
+            humanity=6,
+            status=2,
+            reputation=0,
+            political_ambition=PoliticalAmbition.INCREASE_INFLUENCE,
             physical=1,
             social=2,
             mental=1,
@@ -132,11 +140,12 @@ def install_prince(
         _apply_succession(state, character, rules)
 
     character.is_primogen = False
+    character.status = max(character.status, 4)
     state.prince_id = character.id
     state.prince_political_capital = rules.prince_initial_capital
     state.prince_relations = {clan_id: 0.0 for clan_id in state.clan_states}
     state.praxis_status = "recognized"
-    initialize_coteries(state)
+    initialize_factions(state)
     state.events.append(
         GameEvent(
             night=state.night,
