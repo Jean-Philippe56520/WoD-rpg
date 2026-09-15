@@ -166,7 +166,12 @@ def assess_praxis_pressure(
         target_office=PoliticalOffice.PRINCE.value,
     )
     if historical_pressures:
-        pressure += sum(item.intensity * 8 for item in historical_pressures)
+        # Collective forces represent city-scale constraints rather than one more
+        # personal relationship. Weighting each audited intensity point by nine
+        # makes the combined 1435 occupation + Cour des Miracles sufficient to
+        # contest Alexandre despite his remaining loyalists, without making the
+        # starting crisis critical or forcing a succession.
+        pressure += sum(item.intensity * 9 for item in historical_pressures)
         reasons.extend(item.internal_reason for item in historical_pressures)
 
     score = max(0, min(100, pressure))
