@@ -67,7 +67,7 @@ def test_ventrue_sire_is_derived_from_creation_choices():
     assert mercantile.id == "sire_ventrue_heloise"
 
 
-def test_creation_profile_uses_only_humanitatis_without_touchstone_and_conviction_has_effect():
+def test_creation_profile_uses_humanitatis_without_touchstone_and_conviction_is_moral_not_skill_bonus():
     character = make_character(
         sire_id="sire_brujah_ysabeau",
         sire_name="Ysabeau des Cendres",
@@ -82,7 +82,9 @@ def test_creation_profile_uses_only_humanitatis_without_touchstone_and_convictio
     assert profile.road_affinity == "humanitatis"
     assert profile.touchstones == ()
     assert profile.convictions == ("resist_tyranny",)
-    assert profile.skills["politics"] == 2
+    # V0.49b retire l'ancienne règle maison +1 Politique liée à cette Conviction.
+    assert profile.skills["politics"] == 1
+    assert profile.humanity_stains == 0
     assert profile.feeding_preference is None
 
 
