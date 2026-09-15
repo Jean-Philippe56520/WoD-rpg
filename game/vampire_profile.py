@@ -75,7 +75,7 @@ class VampireProfile:
         if not 0 <= self.willpower <= 10:
             raise ValueError("Willpower must be between 0 and 10")
         if not 0 <= self.bonus_resolution <= 10:
-            raise ValueError("Temporary resolution bonus must be between 0 and 10")
+            raise ValueError("Le bonus temporaire de résolution doit être compris entre 0 et 10")
         _validate_scores("attribute", self.attributes, ATTRIBUTE_NAMES, 1, 5)
         _validate_scores("skill", self.skills, SKILL_NAMES, 0, 5)
         for name, score in self.disciplines.items():
@@ -148,7 +148,7 @@ def _base_skills(clan_id: str) -> dict[str, int]:
 
 
 def default_profile(character: PlayerCharacter) -> VampireProfile:
-    """Create a backward-compatible profile for characters without one."""
+    """Crée un profil rétrocompatible lorsqu'aucune fiche persistante n'existe."""
 
     sire_generation = SIRE_GENERATIONS.get(character.sire_id, 10)
     generation = min(16, sire_generation + 1)
@@ -182,7 +182,7 @@ def profile_for_creation(
     conviction_id: str,
     feeding_preference: str | None = None,
 ) -> VampireProfile:
-    """Build the V0.40 sheet from structured creation choices."""
+    """Construit la fiche structurée issue de la création de personnage."""
 
     conviction(conviction_id)
     profile = default_profile(character)
