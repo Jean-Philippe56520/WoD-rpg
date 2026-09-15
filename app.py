@@ -18,6 +18,7 @@ from game.browser_session import (
 )
 from game.coterie_ui import render_coteries_panel
 from game.court_ui import render_court_panel
+from game.hunger_ui import render_hunger_panel
 from game.runtime import (
     PRODUCTION_GAME_ID,
     PRODUCTION_MODE,
@@ -126,7 +127,7 @@ mode = st.sidebar.radio(
     format_func=lambda value: "Chronique" if value == PRODUCTION_MODE else "Atelier (test/dev)",
     key="wod_runtime_mode_selector",
 )
-st.sidebar.caption("Moteur V0.12 — Prince autonome et agenda de Cour")
+st.sidebar.caption("Moteur V0.13 — Faim, chasse et politique du sang")
 set_runtime_mode(mode)
 
 try:
@@ -180,3 +181,4 @@ finally:
 if "state" in globals() and "player_clan" in globals() and player_clan:
     render_coteries_panel(state, player_clan)
     render_court_panel(state, player_clan)
+    render_hunger_panel(state, player_clan)
