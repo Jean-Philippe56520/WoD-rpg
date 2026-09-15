@@ -222,7 +222,10 @@ def resolve_night(
 
     initialize_factions(next_state)
     vote_result: VoteResolution | None = None
-    if next_state.prince_id is None:
+    # Si la Praxis vient de tomber pendant cette même nuit, aucun vote n'avait pu
+    # être soumis dans les ordres. La nouvelle reconnaissance commence donc à la
+    # nuit suivante, jamais rétroactivement dans la résolution en cours.
+    if not had_prince_at_start and next_state.prince_id is None:
         stances = determine_faction_stances(next_state)
         for clan_id, stance in stances.items():
             clan_state = next_state.clan_states[clan_id]
@@ -287,7 +290,22 @@ def resolve_night(
     petitions = list(embrace_petitions)
     if len(petitions) > len(next_state.clan_states) * rules.embrace_petitions_per_clan:
         raise ValueError("Too many embrace petitions")
-    if petitions:
+    if petitions and next_state.prince_id is None:
+        for clan_id, petition in petitions:
+            requester = next_state.characters[petition.member_id]
+            next_state.events.append(
+                GameEvent(
+                    night=next_state.night,
+                    category="embrace",
+                    message=(
+                        f"La demande d'Étreinte portée pour {requester.name} n'est pas examinée : "
+                        "la Praxis vient de perdre sa reconnaissance et aucun Prince n'est en position "
+                        "d'accorder l'autorisation cette nuit."
+                    ),
+                    audience_clan_ids=(clan_id,),
+                )
+            )
+    elif petitions:
         counts: dict[str, int] = {}
         for clan_id, petition in petitions:
             counts[clan_id] = counts.get(clan_id, 0) + 1
