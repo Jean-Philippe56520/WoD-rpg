@@ -5,6 +5,8 @@ from dataclasses import asdict
 
 from .models import (
     ActionType,
+    AxisPolarity,
+    BloodRank,
     Character,
     Clan,
     ClanNightOrders,
@@ -21,6 +23,55 @@ from .models import (
 )
 
 
+def _character_to_dict(character: Character) -> dict:
+    return {
+        "id": character.id,
+        "name": character.name,
+        "clan_id": character.clan_id,
+        "personal_influence": character.personal_influence,
+        "humanity_axis": character.humanity_axis.value,
+        "tradition_axis": character.tradition_axis.value,
+        "physical": character.physical,
+        "social": character.social,
+        "mental": character.mental,
+        "expertises": list(character.expertises),
+        "disciplines": dict(character.disciplines),
+        "blood_rank": character.blood_rank.value,
+        "backgrounds": dict(character.backgrounds),
+        "loyalty": character.loyalty,
+        "ambition": character.ambition,
+        "is_primogen": character.is_primogen,
+    }
+
+
+def _legacy_axis(value: dict, new_key: str, old_key: str) -> AxisPolarity:
+    if new_key in value:
+        return AxisPolarity(value[new_key])
+    legacy_value = float(value.get(old_key, 0.0))
+    return AxisPolarity.PLUS if legacy_value >= 0 else AxisPolarity.MINUS
+
+
+def _character_from_dict(value: dict) -> Character:
+    return Character(
+        id=value["id"],
+        name=value["name"],
+        clan_id=value.get("clan_id"),
+        personal_influence=float(value.get("personal_influence", 0.0)),
+        humanity_axis=_legacy_axis(value, "humanity_axis", "humanism"),
+        tradition_axis=_legacy_axis(value, "tradition_axis", "tradition"),
+        physical=int(value.get("physical", 1)),
+        social=int(value.get("social", 1)),
+        mental=int(value.get("mental", 1)),
+        expertises=tuple(value.get("expertises", ())),
+        disciplines={k: int(v) for k, v in value.get("disciplines", {}).items()},
+        blood_rank=BloodRank(value.get("blood_rank", BloodRank.NEWBORN.value)),
+        backgrounds={k: int(v) for k, v in value.get("backgrounds", {}).items()},
+        loyalty=float(value.get("loyalty", 50.0)),
+        ambition=float(value.get("ambition", 50.0)),
+        is_primogen=bool(value.get("is_primogen", False)),
+    )
+
+
 def game_state_to_dict(state: GameState) -> dict:
     return {
         "night": state.night,
@@ -30,7 +81,7 @@ def game_state_to_dict(state: GameState) -> dict:
         "prince_political_capital": state.prince_political_capital,
         "prince_relations": state.prince_relations,
         "praxis_status": state.praxis_status,
-        "characters": {key: asdict(value) for key, value in state.characters.items()},
+        "characters": {key: _character_to_dict(value) for key, value in state.characters.items()},
         "clan_states": {
             key: {
                 "clan": asdict(value.clan),
@@ -68,7 +119,7 @@ def game_state_to_dict(state: GameState) -> dict:
 
 def game_state_from_dict(data: dict) -> GameState:
     characters = {
-        key: Character(**value)
+        key: _character_from_dict(value)
         for key, value in data.get("characters", {}).items()
     }
     clan_states = {
