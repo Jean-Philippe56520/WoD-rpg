@@ -5,7 +5,7 @@ import pytest
 from game.actions import apply_action
 from game.config import DEFAULT_RULES
 from game.ideology import build_currents
-from game.models import ActionType, Candidate, GameAction, PrimogenVote
+from game.models import ActionType, AxisPolarity, Candidate, GameAction, PrimogenVote
 from game.politics import determine_current_stances
 from game.resolution import resolve_night
 from game.world import create_initial_game_state, seed_candidates
@@ -69,10 +69,15 @@ def test_diplomacy_is_easier_between_ideologically_aligned_primogens():
     opposed = deepcopy(aligned)
     a = aligned.characters["primogen_ventrue"]
     b = aligned.characters["primogen_toreador"]
-    b.humanism, b.tradition = a.humanism, a.tradition
+    b.humanity_axis, b.tradition_axis = a.humanity_axis, a.tradition_axis
     a2 = opposed.characters["primogen_ventrue"]
     b2 = opposed.characters["primogen_toreador"]
-    b2.humanism, b2.tradition = -a2.humanism, -a2.tradition
+    b2.humanity_axis = (
+        AxisPolarity.MINUS if a2.humanity_axis == AxisPolarity.PLUS else AxisPolarity.PLUS
+    )
+    b2.tradition_axis = (
+        AxisPolarity.MINUS if a2.tradition_axis == AxisPolarity.PLUS else AxisPolarity.PLUS
+    )
     apply_action(aligned, GameAction("ventrue", ActionType.DIPLOMACY, "toreador"))
     apply_action(opposed, GameAction("ventrue", ActionType.DIPLOMACY, "toreador"))
     assert aligned.clan_states["ventrue"].relations["toreador"] > opposed.clan_states["ventrue"].relations["toreador"]
