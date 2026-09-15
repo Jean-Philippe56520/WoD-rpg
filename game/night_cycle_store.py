@@ -201,8 +201,13 @@ class NightCycleStore:
                 pass
         action_count = sum(item.get("kind") == "free_action" for item in state.log)
         details: list[str] = []
-        for index, item in enumerate(state.log):
-            kind = "Événement" if item.get("kind") == "event" else f"Action libre {index}"
+        free_number = 0
+        for item in state.log:
+            if item.get("kind") == "event":
+                kind = "Événement"
+            else:
+                free_number += 1
+                kind = f"Action libre {free_number}"
             title = str(item.get("title", "")).strip()
             choice = str(item.get("choice_label", "")).strip()
             summary = str(item.get("summary", "")).strip()
@@ -220,6 +225,5 @@ class NightCycleStore:
             detail=" ".join(details) or "La nuit s'achève sans autre fait notable.",
             updated_character=updated,
             tags=("night_cycle", "event_then_free_actions"),
-            steps=state.log,
         )
         return ChronicleStore(self.repository).advance_personal_night(character, outcome)
