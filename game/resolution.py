@@ -17,6 +17,7 @@ from .domains import (
 )
 from .embrace import process_primogen_petition
 from .factions import determine_faction_stances, initialize_factions
+from .hunger import resolve_hunger
 from .models import (
     Candidate,
     DomainDecisionOrder,
@@ -297,6 +298,9 @@ def resolve_night(
             next_state = process_primogen_petition(next_state, clan_id, petition, rules)
 
     next_state.events.extend(resolve_autonomous_reactions(next_state))
+    # La chasse de routine se produit avant l'expiration territoriale de fin de
+    # nuit : un droit reste donc exploitable pendant sa nuit d'échéance incluse.
+    next_state.events.extend(resolve_hunger(next_state))
     next_state.events.extend(resolve_domain_pressure(next_state))
     initialize_factions(next_state)
 
