@@ -59,6 +59,9 @@ def test_ancienne_sauvegarde_complete_les_competences_manquantes_sans_perdre_les
     data.pop("health_superficial")
     data.pop("health_aggravated")
     data.pop("humanity_stains")
+    data.pop("current_compulsion")
+    data.pop("compulsion_focus")
+    data.pop("compulsion_scope")
     data["schema_version"] = 2
 
     migrated = profile_from_dict(data)
@@ -71,7 +74,8 @@ def test_ancienne_sauvegarde_complete_les_competences_manquantes_sans_perdre_les
     assert migrated.health_superficial == 0
     assert migrated.health_aggravated == 0
     assert migrated.humanity_stains == 0
-    assert migrated.schema_version == 4
+    assert migrated.current_compulsion is None
+    assert migrated.schema_version == 5
 
 
 def test_specialite_pertinente_ajoute_exactement_un_de():
