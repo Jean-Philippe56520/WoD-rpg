@@ -10,14 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .config import DEFAULT_RULES, GameRules
-from .crises import (
-    ANARCHS,
-    HUNTERS,
-    active_crises,
-    has_active_crisis_for_faction,
-    open_crisis,
-    resolve_crisis_cycle,
-)
+from .crises import ANARCHS, HUNTERS, active_crises, has_active_crisis_for_faction, open_crisis
 from .models import Domain, GameEvent, GameState
 
 
@@ -123,29 +116,20 @@ def resolve_external_pressures(
     state: GameState,
     rules: GameRules = DEFAULT_RULES,
 ) -> list[GameEvent]:
-    """Résout les crises existantes, puis fait évoluer les pressions extérieures.
+    """Fait évoluer les menaces et ouvre les crises lorsque les seuils sont atteints.
 
-    Une crise active au début de la nuit bloque l'ouverture d'une deuxième crise
-    de la même faction pendant cette résolution, même si elle vient d'être réglée.
-    Cela évite une réapparition immédiate sans fenêtre politique intermédiaire.
+    Une crise absorbe une partie de la pression qui l'a produite. Tant que cette
+    crise reste active, la même faction ne crée pas une seconde crise ; la pression
+    peut cependant continuer à monter, rendant une rechute rapide possible ensuite.
     """
-
-    active_at_start = active_crises(state)
-    had_anarch_crisis = any(crisis.faction == ANARCHS for crisis in active_at_start)
-    had_hunter_crisis = any(crisis.faction == HUNTERS for crisis in active_at_start)
-
-    events = resolve_crisis_cycle(state, rules)
 
     previous = current_external_pressures(state)
     anarch_pressure = _next_anarch_pressure(state, previous.anarch_pressure, rules)
     hunter_attention = _next_hunter_attention(state, previous.hunter_attention, rules)
+    events: list[GameEvent] = []
+    reserved_domains = {crisis.domain_id for crisis in active_crises(state)}
 
-    # Les transitions de crise de cette nuit ne sont pas encore ajoutées à
-    # state.events. On réserve donc au minimum tous les Domaines qui étaient sous
-    # crise au début de cette phase de fin de nuit.
-    reserved_domains = {crisis.domain_id for crisis in active_at_start}
-
-    if anarch_pressure >= rules.anarch_incident_threshold and not had_anarch_crisis:
+    if anarch_pressure >= rules.anarch_incident_threshold and not has_active_crisis_for_faction(state, ANARCHS):
         domain = _choose_anarch_target(state, reserved_domains)
         if domain is not None:
             events.append(open_crisis(state, ANARCHS, domain.id, rules))
@@ -155,7 +139,7 @@ def resolve_external_pressures(
                 rules,
             )
 
-    if hunter_attention >= rules.hunter_incident_threshold and not had_hunter_crisis:
+    if hunter_attention >= rules.hunter_incident_threshold and not has_active_crisis_for_faction(state, HUNTERS):
         domain = _choose_hunter_target(state, reserved_domains)
         if domain is not None:
             events.append(open_crisis(state, HUNTERS, domain.id, rules))
