@@ -516,6 +516,7 @@ class ActionType(str, Enum):
     DOMAIN_STEWARD = "domain_steward"
     DOMAIN_INTRUSION = "domain_intrusion"
     BRACONNAGE = "braconnage"
+    CHALLENGE_PRAXIS = "challenge_praxis"
     # Legacy order values accepted for already-submitted V0.7 nights.
     CONSOLIDATE = "consolidate"
     RALLY_OPPOSITION = "rally_opposition"

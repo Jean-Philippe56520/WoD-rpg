@@ -23,6 +23,7 @@ from .domains import open_domain_dispute
 from .factions import initialize_factions
 from .information import investigation_rumor_event
 from .models import ActionType, ClanFactionSide, GameAction, GameEvent, GameState
+from .praxis_challenge import challenge_intent_event, resolve_praxis_challenge
 from .social_politics import add_grievance
 
 
@@ -103,15 +104,19 @@ def resolve_actions_simultaneously(
 
     for action in sorted(actions, key=_action_key):
         trial = deepcopy(baseline)
-        agency = evaluate_member_mission(trial, action)
-        if agency is not None and not agency.obeys:
-            event = apply_member_refusal(trial, action, agency, rules)
+        if action.action_type == ActionType.CHALLENGE_PRAXIS:
+            agency = None
+            event = challenge_intent_event(trial, action)
         else:
-            event = apply_action(trial, action, rules)
+            agency = evaluate_member_mission(trial, action)
+            if agency is not None and not agency.obeys:
+                event = apply_member_refusal(trial, action, agency, rules)
+            else:
+                event = apply_action(trial, action, rules)
 
         action_executed = (
             (agency is None or agency.obeys)
-            and event.category not in {"opposition", "coterie", "agency"}
+            and event.category not in {"opposition", "coterie", "agency", "autonomie"}
         )
         if action_executed:
             executed_actions.append(action)
@@ -338,6 +343,14 @@ def resolve_actions_simultaneously(
     # pactes issus d'une diplomatie réciproque deviennent actifs ensuite.
     events.extend(breach_diplomatic_pacts(state, executed_actions, rules))
     events.extend(register_reciprocal_diplomatic_pacts(state, executed_actions, rules))
+
+    _, challenge_events = resolve_praxis_challenge(
+        state,
+        executed_actions,
+        rules,
+        reference_state=baseline,
+    )
+    events.extend(challenge_events)
 
     initialize_factions(state)
     return events

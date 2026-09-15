@@ -27,21 +27,24 @@ def determine_current_stances(
     return determine_faction_stances(state)
 
 
-def resolve_praxis_vote(
+def primogen_political_weights(
     state: GameState,
     stances: Mapping[str, FactionStance],
-    votes: Mapping[str, PrimogenVote],
-    candidates: Iterable[Candidate],
     opposition_transfer_ratio: float = 0.5,
-    recognition_threshold: float = 0.5,
-) -> VoteResolution:
+) -> tuple[dict[str, float], list[dict[str, float | str]]]:
+    """Calcule le poids politique réellement contrôlé par chaque Primogène.
+
+    Cette fonction matérialise la règle locale de la chronique : si l'opposition
+    soutient son Primogène, son influence reste entièrement derrière lui. Sinon,
+    une part configurable est transférée au Primogène allié choisi par l'opposition.
+    Le même poids sert désormais à la reconnaissance comme à la contestation de
+    Praxis, ce qui évite deux systèmes politiques divergents.
+    """
+
     if not 0 <= opposition_transfer_ratio <= 1:
         raise ValueError("opposition_transfer_ratio must be between 0 and 1")
-    if not 0 <= recognition_threshold < 1:
-        raise ValueError("recognition_threshold must be between 0 (inclusive) and 1")
 
     initialize_factions(state)
-    candidate_map = {candidate.id: candidate for candidate in candidates}
     primogen_ids = {cs.clan.primogen_id for cs in state.clan_states.values()}
     primogen_weights = {primogen_id: 0.0 for primogen_id in primogen_ids}
     transfers: list[dict[str, float | str]] = []
@@ -78,6 +81,27 @@ def resolve_praxis_vote(
                 "amount": transferred,
             }
         )
+
+    return primogen_weights, transfers
+
+
+def resolve_praxis_vote(
+    state: GameState,
+    stances: Mapping[str, FactionStance],
+    votes: Mapping[str, PrimogenVote],
+    candidates: Iterable[Candidate],
+    opposition_transfer_ratio: float = 0.5,
+    recognition_threshold: float = 0.5,
+) -> VoteResolution:
+    if not 0 <= recognition_threshold < 1:
+        raise ValueError("recognition_threshold must be between 0 (inclusive) and 1")
+
+    candidate_map = {candidate.id: candidate for candidate in candidates}
+    primogen_weights, transfers = primogen_political_weights(
+        state,
+        stances,
+        opposition_transfer_ratio,
+    )
 
     candidate_totals = {candidate_id: 0.0 for candidate_id in candidate_map}
     total_cast = 0.0
