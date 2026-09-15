@@ -248,10 +248,11 @@ class ActionType(str, Enum):
 class GameAction:
     clan_id: str
     action_type: ActionType
-    actor_character_id: Optional[str] = None
-    target_character_id: Optional[str] = None
+    # Legacy field order intentionally preserved for positional V0.7 callers.
     target_clan_id: Optional[str] = None
     target_current_id: Optional[str] = None
+    actor_character_id: Optional[str] = None
+    target_character_id: Optional[str] = None
 
 
 class NightStatus(str, Enum):
