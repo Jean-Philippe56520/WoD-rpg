@@ -117,7 +117,7 @@ def test_primogen_cannot_be_standardized_in_1435():
     character = make_character()
     state = initial_simulation(CHRONICLE_GAME_ID)
 
-    with pytest.raises(ValueError, match="Primogen"):
+    with pytest.raises(ValueError, match="primogen"):
         assign_office(
             state,
             [character],
