@@ -44,11 +44,13 @@ ROAD_LABELS = {
     "humanitatis": "Via Humanitatis",
     "regalis": "Via Regalis",
     "caeli": "Via Caeli",
+    "bestiae": "Via Bestiae",
+    "peccati": "Via Peccati",
     "via_mutationis": "Voie de la transformation",
 }
 CAMARILLA_STAGE_LABELS = {
     "absent": "Aucune Camarilla constituée",
-    "project": "Projet de coalition",
+    "project": "Camarilla naissante — coalition annoncée",
     "coalition": "Coalition proto-Camarilla",
     "institutional": "Camarilla institutionnelle",
 }
@@ -77,7 +79,7 @@ def _render_creation(
     st.caption("1435 · Révolte, lignages et naissance d'un nouvel ordre")
     st.markdown(
         "Vous êtes un vampire récemment Étreint. Votre sire répond encore de vous, votre droit de chasse dépend "
-        "d'autrui et le projet qui deviendra la Camarilla n'est encore qu'une coalition contestée."
+        "d'autrui et la Camarilla qui vient d'être annoncée reste une coalition contestée, loin de son ordre futur."
     )
 
     with st.form("create_player_character"):
@@ -117,7 +119,7 @@ def _render_creation(
         )
         road_affinity = st.selectbox(
             "Affinité de Voie",
-            options=("humanitatis", "regalis", "caeli"),
+            options=("humanitatis", "regalis", "caeli", "bestiae", "peccati"),
             format_func=lambda value: ROAD_LABELS[value],
         )
         feeding_preference = st.text_input(
@@ -465,7 +467,15 @@ def _render_world(repo, character, simulation, progress) -> None:
         st.caption("La première convergence n'a pas encore produit d'événement partagé.")
 
 
-def _render_night(store, simulation_store, character, profile, simulation, progress) -> None:
+def _render_night(
+    store,
+    profile_store,
+    simulation_store,
+    character,
+    profile,
+    simulation,
+    progress,
+) -> None:
     st.subheader(f"Nuit {character.local_night}")
     st.write(f"**Objectif du chapitre :** {character.chapter_goal}")
     st.caption(
@@ -517,6 +527,7 @@ def _render_night(store, simulation_store, character, profile, simulation, progr
                     free_intent=free_intent,
                 )
                 simulation_store.save(resolution.simulation)
+                profile_store.save(resolution.profile)
                 dice = resolution.dice
                 st.session_state["wod_last_chronicle_notice"] = (
                     f"{resolution.outcome.summary} {resolution.outcome.detail} "
@@ -584,7 +595,15 @@ def render_chronicle_app(
         if character.ready_for_convergence:
             _render_convergence(repo, store, character, progress)
         else:
-            _render_night(store, simulation_store, character, profile, simulation, progress)
+            _render_night(
+                store,
+                profile_store,
+                simulation_store,
+                character,
+                profile,
+                simulation,
+                progress,
+            )
 
     with scenes_tab:
         _render_scenes(repo, store, character)
