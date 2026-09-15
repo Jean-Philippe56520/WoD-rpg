@@ -4,6 +4,7 @@ from dataclasses import dataclass, replace
 from typing import Any
 
 from .chronicle import ChronicleProgress
+from .chronicle_politics import validate_political_state
 from .chronicle_simulation import SimulationBeat, advance_simulation
 from .chronicle_simulation_store import ChronicleSimulationStore
 from .chronicle_store import ChronicleStore
@@ -40,6 +41,7 @@ class ChronicleService:
             segment=progress.segment,
             characters=characters,
         )
+        validate_political_state(advanced, characters, era_for_year(progress.year))
         next_progress = self.store.resolve_convergence(game_id)
 
         self.world_store.record_beats(progress, beats)
@@ -62,6 +64,7 @@ class ChronicleService:
             year=next_progress.year,
             institution_stage=next_era.camarilla_stage.value,
         )
+        validate_political_state(final_simulation, characters, next_era)
         self.simulation_store.save(final_simulation)
 
         all_beats = beats + tuple(historical_beats)

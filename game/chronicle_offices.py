@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .chronicle import PlayerCharacter, PoliticalOffice
+from .chronicle_politics import actor_offices
 from .chronicle_simulation import SimulationState
 from .era import EraRules
 
@@ -20,7 +21,8 @@ def office_eligibility(
     simulation: SimulationState,
     era: EraRules,
 ) -> tuple[OfficeEligibility, ...]:
-    held_domain = any(domain.holder_id == character.character_id for domain in simulation.domains.values())
+    current_offices = set(actor_offices(simulation, character.character_id))
+    held_domain = PoliticalOffice.DOMAIN_HOLDER.value in current_offices
     rows: list[OfficeEligibility] = []
 
     rows.append(
@@ -54,29 +56,49 @@ def office_eligibility(
         era.primogen_council_standardized
         and PoliticalOffice.PRIMOGEN.value in era.available_offices
     )
+    blocked_by_prince = PoliticalOffice.PRINCE.value in current_offices
     rows.append(
         OfficeEligibility(
             office=PoliticalOffice.PRIMOGEN.value,
             available=primogen_available,
-            eligible=primogen_available and character.status >= 3 and character.personal_influence >= 5.0,
+            eligible=(
+                primogen_available
+                and not blocked_by_prince
+                and character.status >= 3
+                and character.personal_influence >= 5.0
+            ),
             reason=(
-                "Le Primogénat est désormais une institution reconnue, mais il exige un poids politique réel."
-                if primogen_available
-                else "En cette période, le Primogénat n'est pas traité comme une institution standardisée de la cité."
+                "Un Prince reconnu ne peut pas être simultanément Primogène."
+                if blocked_by_prince
+                else (
+                    "Le Primogénat est désormais une institution reconnue, mais il exige un poids politique réel."
+                    if primogen_available
+                    else "En cette période, le Primogénat n'est pas traité comme une institution standardisée de la cité."
+                )
             ),
         )
     )
 
     prince_available = PoliticalOffice.PRINCE.value in era.available_offices
+    blocked_by_primogen = PoliticalOffice.PRIMOGEN.value in current_offices
     rows.append(
         OfficeEligibility(
             office=PoliticalOffice.PRINCE.value,
             available=prince_available,
-            eligible=prince_available and character.status >= 3 and character.personal_influence >= 6.0,
+            eligible=(
+                prince_available
+                and not blocked_by_primogen
+                and character.status >= 3
+                and character.personal_influence >= 6.0
+            ),
             reason=(
-                "Un Prince doit imposer ou faire reconnaître sa Praxis ; ce n'est jamais une promotion automatique."
-                if prince_available
-                else "La fonction princière n'est pas disponible dans cette configuration."
+                "Un Primogène reconnu doit quitter cette fonction avant de pouvoir tenir la Praxis."
+                if blocked_by_primogen
+                else (
+                    "Un Prince doit imposer ou faire reconnaître sa Praxis ; ce n'est jamais une promotion automatique."
+                    if prince_available
+                    else "La fonction princière n'est pas disponible dans cette configuration."
+                )
             ),
         )
     )
@@ -84,6 +106,13 @@ def office_eligibility(
 
 
 def validate_office_assignment(character: PlayerCharacter, office: str, era: EraRules) -> None:
+    """Compatibility validator for callers that do not yet own world state.
+
+    New Chronicle code should use ``chronicle_politics.assign_office`` because
+    it also validates the canonical office registry and Prince/Primogen
+    exclusivity.
+    """
+
     resolved = PoliticalOffice(office).value
     if resolved not in era.available_offices:
         raise ValueError(f"Office {resolved} is not available in year {era.year}")
