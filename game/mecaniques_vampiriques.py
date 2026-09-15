@@ -19,6 +19,22 @@ BONUS_COUP_DE_SANG = {
     10: 6,
 }
 
+# Table V5 corrigée (Companion / Player's Guide) : la Sévérité du Fléau
+# n'est pas identique au bonus de Coup de Sang pour Puissance 0.
+BANE_SEVERITY = {
+    0: 0,
+    1: 2,
+    2: 2,
+    3: 3,
+    4: 3,
+    5: 4,
+    6: 4,
+    7: 5,
+    8: 5,
+    9: 6,
+    10: 6,
+}
+
 
 @dataclass(frozen=True)
 class UsageDiscipline:
@@ -32,6 +48,12 @@ def bonus_coup_de_sang(puissance_du_sang: int) -> int:
     if puissance_du_sang not in BONUS_COUP_DE_SANG:
         raise ValueError("Puissance du Sang hors plage prise en charge")
     return BONUS_COUP_DE_SANG[puissance_du_sang]
+
+
+def severite_fleau(puissance_du_sang: int) -> int:
+    if puissance_du_sang not in BANE_SEVERITY:
+        raise ValueError("Puissance du Sang hors plage prise en charge")
+    return BANE_SEVERITY[puissance_du_sang]
 
 
 def perte_volonte_apres_echec(choice, dice) -> int:
