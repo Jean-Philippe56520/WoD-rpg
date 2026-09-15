@@ -63,6 +63,16 @@ class GameRules:
     embrace_requester_influence_gain: float = 2.0
     prince_auto_refusal_relation_floor: float = -10.0
 
+    # V0.16 : l'autorisation produit un véritable infant. Un refus peut être
+    # contourné par un vampire très ambitieux et politiquement détaché.
+    embrace_childe_initial_influence: float = 3.0
+    embrace_childe_initial_hunger: int = 2
+    clandestine_embrace_ambition_threshold: float = 70.0
+    clandestine_embrace_stability_loss: float = 3.0
+    clandestine_embrace_masquerade_loss: float = 2.0
+    clandestine_embrace_prince_relation_loss: float = 5.0
+    clandestine_embrace_reputation_loss: int = 1
+
     approve_relation_support: float = 3.0
     approve_relation_neutral: float = 0.0
     approve_relation_oppose: float = -8.0
