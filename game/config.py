@@ -91,6 +91,28 @@ class GameRules:
     praxis_challenge_failure_prince_relation_loss: float = 3.0
     deposed_prince_status_loss: int = 1
 
+    # V0.19 : les faiblesses internes créent des opportunités extérieures.
+    external_pressure_max: int = 10
+    anarch_stability_threshold: float = 90.0
+    anarch_recovery_stability_threshold: float = 97.0
+    anarch_pressure_gain_unstable: int = 1
+    anarch_pressure_gain_contested: int = 2
+    anarch_pressure_relief: int = 1
+    anarch_incident_threshold: int = 4
+    anarch_incident_stability_loss: float = 2.0
+    anarch_incident_domain_pressure_gain: int = 1
+    anarch_incident_pressure_relief: int = 2
+    hunter_masquerade_threshold: float = 95.0
+    hunter_critical_masquerade_threshold: float = 85.0
+    hunter_recovery_masquerade_threshold: float = 99.0
+    hunter_attention_gain_exposed: int = 1
+    hunter_attention_gain_critical: int = 2
+    hunter_attention_relief: int = 1
+    hunter_incident_threshold: int = 4
+    hunter_incident_masquerade_loss: float = 2.0
+    hunter_incident_domain_pressure_gain: int = 1
+    hunter_incident_attention_relief: int = 2
+
     approve_relation_support: float = 3.0
     approve_relation_neutral: float = 0.0
     approve_relation_oppose: float = -8.0
