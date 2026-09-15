@@ -46,4 +46,8 @@ def create_repository(
     if supabase_url and supabase_key:
         return SupabaseGameRepository(supabase_url, supabase_key), "Supabase"
 
-    return SQLiteGameRepository(sqlite_path), "SQLite local"
+    # Le dépôt SQLite peut être mis en cache par Streamlit alors que le cwd change
+    # (tests AppTest, redémarrages locaux). Conserver un chemin absolu évite qu'un
+    # dépôt déjà construit pointe ensuite vers un autre répertoire relatif.
+    resolved_path = Path(sqlite_path).expanduser().resolve()
+    return SQLiteGameRepository(resolved_path), "SQLite local"
