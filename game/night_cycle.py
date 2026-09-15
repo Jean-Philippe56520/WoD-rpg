@@ -209,18 +209,31 @@ def _append_resolution_detail(
     )
 
 
-def _aggraver_domaine_apres_frenesie(simulation, situation: Situation):
+def _aggraver_domaine_apres_frenesie(simulation, situation: Situation, baseline_simulation=None):
+    """Garantit une seule aggravation totale du Domaine pour la complication bestiale.
+
+    Une réussite bestiale de chasse peut déjà avoir augmenté le risque via la
+    résolution de situation. La Frénésie ne doit pas empiler une seconde fois la
+    même hausse automatique : elle porte alors le risque au moins à +1 par rapport
+    à l'état précédant l'action, sans dépasser une hausse déjà appliquée.
+    """
+
     if not situation.id.startswith("hunt_"):
         return simulation
     domain_id = situation.id.removeprefix("hunt_")
     domain = simulation.domains.get(domain_id)
     if domain is None:
         return simulation
+    baseline = None
+    if baseline_simulation is not None:
+        baseline = baseline_simulation.domains.get(domain_id)
+    target_risk = min(3, (baseline.masquerade_risk + 1) if baseline is not None else domain.masquerade_risk + 1)
+    target_pressure = max(0, (baseline.pressure + 1) if baseline is not None else domain.pressure + 1)
     domains = dict(simulation.domains)
     domains[domain_id] = replace(
         domain,
-        masquerade_risk=min(3, domain.masquerade_risk + 1),
-        pressure=max(0, domain.pressure + 1),
+        masquerade_risk=max(domain.masquerade_risk, target_risk),
+        pressure=max(domain.pressure, target_pressure),
     )
     return replace(simulation, domains=domains)
 
@@ -248,7 +261,6 @@ def _appliquer_compulsion_bestiale(
         return resolution
 
     if resolution.choice.effect in {"hunt", "hunt_social"}:
-        # La chasse possède sa conséquence bestiale spécifique : la Frénésie de Faim.
         return resolution
     if not beast_result_can_trigger_compulsion(resolution.dice):
         return resolution
@@ -273,6 +285,7 @@ def _appliquer_frenesie_faim_chasse(
     *,
     options: OptionsResolution,
     step_nonce: str,
+    baseline_simulation=None,
 ) -> SituationResolution:
     if resolution.choice.effect not in {"hunt", "hunt_social"}:
         return resolution
@@ -299,7 +312,11 @@ def _appliquer_frenesie_faim_chasse(
         )
 
     updated_character = replace(resolution.outcome.updated_character, hunger=1)
-    next_simulation = _aggraver_domaine_apres_frenesie(resolution.simulation, resolution.situation)
+    next_simulation = _aggraver_domaine_apres_frenesie(
+        resolution.simulation,
+        resolution.situation,
+        baseline_simulation=baseline_simulation,
+    )
     if frenzy.rode_wave:
         text = (
             "Vous choisissez de Chevaucher la vague : la Frénésie de Faim vous emporte. "
@@ -380,6 +397,7 @@ def _resolve_with_step_nonce(
         resolution,
         options=options,
         step_nonce=step_nonce,
+        baseline_simulation=simulation,
     )
     return resolution
 
@@ -473,7 +491,8 @@ def _event_budget(character: PlayerCharacter, resolution: SituationResolution) -
     dice = resolution.dice
     effect = resolution.choice.effect
     degre = consequence_graduee(resolution.choice, dice).degre
-    if "frenesie_faim" in resolution.outcome.tags:
+    outcome_tags = tuple(getattr(getattr(resolution, "outcome", None), "tags", ()) or ())
+    if "frenesie_faim" in outcome_tags:
         return 0, "La Frénésie de Faim consume le reste de cette Nuit significative."
     if effect == "sire_refuse" and not dice.success:
         memory = memory_for(resolution.simulation, resolution.situation.source_actor_id, character)
@@ -561,7 +580,8 @@ def resolve_free_action(
     cost = remaining_actions if situation.id.startswith("hunt_") and choice_id == "careful_hunt" else 1
     left = max(0, remaining_actions - cost)
     degre = consequence_graduee(resolution.choice, resolution.dice).degre
-    if "frenesie_faim" in resolution.outcome.tags:
+    outcome_tags = tuple(getattr(resolution.outcome, "tags", ()) or ())
+    if "frenesie_faim" in outcome_tags:
         left = 0
         consequence = "La Frénésie de Faim consume tout le temps qui restait avant l'aube."
     elif degre == DegreIssue.ECHEC_GRAVE:
@@ -603,7 +623,7 @@ def log_entry(kind: str, result: NightStepResult) -> dict[str, Any]:
         "degre_issue": consequence_graduee(r.choice, r.dice).degre.value,
         "relances_volonte": r.dice.relances_volonte,
         "compulsion": r.profile.current_compulsion,
-        "frenesie_faim": "frenesie_faim" in r.outcome.tags,
+        "frenesie_faim": "frenesie_faim" in tuple(getattr(r.outcome, "tags", ()) or ()),
         "remaining_actions_after": result.remaining_actions,
         "consequence": result.consequence,
     }
