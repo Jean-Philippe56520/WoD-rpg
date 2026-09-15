@@ -42,6 +42,7 @@ from game.world import REQUIRED_CLANS, create_initial_game_state
 AUTH_SESSION_KEY = "wod_auth_session"
 AUTH_SEEN_KEY = "wod_auth_seen_in_streamlit_session"
 LOCAL_PLAYER_KEY = "wod_local_player_id"
+LOCAL_CHRONICLE_PLAYER_KEY = "wod_local_chronicle_player_id"
 
 st.set_page_config(
     page_title="WoD RPG - Chronique vampirique",
@@ -193,7 +194,7 @@ mode = st.sidebar.radio(
     format_func=lambda value: "Chronique" if value == PRODUCTION_MODE else "Atelier legacy (test/dev)",
     key="wod_runtime_mode_selector",
 )
-st.sidebar.caption("Moteur V0.21 — personnage joueur et nuits personnelles")
+st.sidebar.caption("Moteur V0.42 — Chronique solo persistante")
 set_runtime_mode(mode)
 
 try:
@@ -232,9 +233,9 @@ if mode == PRODUCTION_MODE:
                 clear_device_refresh_token()
                 st.rerun()
     else:
-        if LOCAL_PLAYER_KEY not in st.session_state:
-            st.session_state[LOCAL_PLAYER_KEY] = f"local:{uuid.uuid4().hex}"
-        player_id = st.session_state[LOCAL_PLAYER_KEY]
+        if LOCAL_CHRONICLE_PLAYER_KEY not in st.session_state:
+            st.session_state[LOCAL_CHRONICLE_PLAYER_KEY] = f"local:{uuid.uuid4().hex}"
+        player_id = st.session_state[LOCAL_CHRONICLE_PLAYER_KEY]
         player_name = "Joueur local"
 
     render_chronicle_app(
@@ -247,7 +248,7 @@ if mode == PRODUCTION_MODE:
 
 
 # L'Atelier conserve volontairement le moteur V0.20.1 comme banc de test et de
-# comparaison pendant la migration. Il ne touche jamais à la chronique 1435.
+# comparaison pendant la migration. Il ne touche jamais aux Chroniques personnelles.
 st.sidebar.warning("MODE ATELIER — moteur politique V0.20.1 isolé")
 try:
     _assign_workshop_players(runtime_repo)
