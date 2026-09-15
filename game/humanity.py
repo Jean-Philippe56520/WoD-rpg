@@ -4,6 +4,7 @@ from dataclasses import dataclass, replace
 import hashlib
 
 from .chronicle import PlayerCharacter
+from .vampire_profile import VampireProfile
 
 
 @dataclass(frozen=True)
@@ -13,8 +14,8 @@ class PrincipeChronique:
     description: str
 
 
-# Principes par défaut de la chronique solo. Ils sont volontairement définis
-# comme des données afin de pouvoir être configurés sans réécrire le moteur.
+# Principes par défaut de la chronique solo. Ils restent des données afin de
+# pouvoir devenir configurables sans modifier le moteur de résolution.
 PRINCIPES_CHRONIQUE: tuple[PrincipeChronique, ...] = (
     PrincipeChronique(
         "vie_sans_necessite",
@@ -36,7 +37,7 @@ PRINCIPES_CHRONIQUE: tuple[PrincipeChronique, ...] = (
 
 @dataclass(frozen=True)
 class ResultatFletrissures:
-    personnage: PlayerCharacter
+    profile: VampireProfile
     demandees: int
     mitigees: int
     ajoutees: int
@@ -46,6 +47,7 @@ class ResultatFletrissures:
 @dataclass(frozen=True)
 class ResultatRemords:
     personnage: PlayerCharacter
+    profile: VampireProfile
     pool: int
     des: tuple[int, ...]
     succes: bool
@@ -61,16 +63,17 @@ def capacite_fletrissures(humanity: int) -> int:
 
 def appliquer_fletrissures(
     character: PlayerCharacter,
+    profile: VampireProfile,
     amount: int,
     *,
     conviction_protege: bool = False,
 ) -> ResultatFletrissures:
-    """Ajoute des Flétrissures et applique la mitigation simplifiée d'une Conviction.
+    """Ajoute des Flétrissures à la piste morale persistée dans le profil.
 
-    Dans WoD-rpg, une Conviction explicitement pertinente peut réduire de 1 les
-    Flétrissures d'un acte, sans jamais les annuler au-delà de ce montant.
-    Le débordement est signalé au moteur appelant ; la Volonté reste volontairement
-    séparée car son suivi est actuellement simplifié par rapport à la piste V5 complète.
+    Une Conviction explicitement pertinente peut réduire de 1 les Flétrissures
+    reçues pour l'acte. Le débordement est signalé plutôt que transformé
+    silencieusement en une autre ressource : la piste de Volonté de WoD-rpg est
+    encore simplifiée et sera harmonisée ultérieurement.
     """
 
     if amount < 0:
@@ -78,15 +81,15 @@ def appliquer_fletrissures(
     mitigees = 1 if conviction_protege and amount > 0 else 0
     effectives = max(0, amount - mitigees)
     capacity = capacite_fletrissures(character.humanity)
-    disponible = max(0, capacity - character.humanity_stains)
+    disponible = max(0, capacity - profile.humanity_stains)
     ajoutees = min(disponible, effectives)
     debordement = max(0, effectives - ajoutees)
     updated = replace(
-        character,
-        humanity_stains=min(capacity, character.humanity_stains + ajoutees),
+        profile,
+        humanity_stains=min(capacity, profile.humanity_stains + ajoutees),
     )
     return ResultatFletrissures(
-        personnage=updated,
+        profile=updated,
         demandees=amount,
         mitigees=mitigees,
         ajoutees=ajoutees,
@@ -94,11 +97,11 @@ def appliquer_fletrissures(
     )
 
 
-def pool_remords(character: PlayerCharacter) -> int:
-    """Dés de Remords V5 : cases non marquées de la piste, minimum 1 dé."""
+def pool_remords(character: PlayerCharacter, profile: VampireProfile) -> int:
+    """Dés de Remords : cases non marquées de la piste, avec un minimum d'un dé."""
 
     capacity = capacite_fletrissures(character.humanity)
-    return max(1, capacity - character.humanity_stains)
+    return max(1, capacity - profile.humanity_stains)
 
 
 def _des_remords(pool: int, seed: str) -> tuple[int, ...]:
@@ -109,12 +112,18 @@ def _des_remords(pool: int, seed: str) -> tuple[int, ...]:
     return tuple(values)
 
 
-def resoudre_remords(character: PlayerCharacter, *, seed: str) -> ResultatRemords:
-    """Résout le Remords en fin de Cycle si le vampire porte des Flétrissures."""
+def resoudre_remords(
+    character: PlayerCharacter,
+    profile: VampireProfile,
+    *,
+    seed: str,
+) -> ResultatRemords:
+    """Résout le Remords en fin de Cycle, adaptation de la fin de session V5."""
 
-    if character.humanity_stains <= 0:
+    if profile.humanity_stains <= 0:
         return ResultatRemords(
             personnage=character,
+            profile=profile,
             pool=0,
             des=(),
             succes=True,
@@ -122,14 +131,16 @@ def resoudre_remords(character: PlayerCharacter, *, seed: str) -> ResultatRemord
             wassail=character.humanity <= 0,
         )
 
-    pool = pool_remords(character)
+    pool = pool_remords(character, profile)
     dice = _des_remords(pool, seed)
     success = any(value >= 6 for value in dice)
     humanity_loss = 0 if success else 1
     new_humanity = max(0, character.humanity - humanity_loss)
-    updated = replace(character, humanity=new_humanity, humanity_stains=0)
+    updated_character = replace(character, humanity=new_humanity)
+    updated_profile = replace(profile, humanity_stains=0)
     return ResultatRemords(
-        personnage=updated,
+        personnage=updated_character,
+        profile=updated_profile,
         pool=pool,
         des=dice,
         succes=success,
